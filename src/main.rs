@@ -1,8 +1,9 @@
 //! RustRTOS - ESP32-S3 高性能实时操作系统
 //!
-//! 基于 Embassy 异步运行时，采用混合调度策略：
-//! - 协作式 async/await 任务调度
-//! - 中断驱动的高优先级任务抢占
+//! 基于 esp-hal 1.0 和 esp-rtos，采用混合调度策略：
+//! - 协作式 async/await 任务调度 (Embassy)
+//! - 中断驱动的高优先级任务抢占 (InterruptExecutor)
+//! - 双核支持 (Core0 + Core1)
 //!
 //! 硬件目标: ESP32-S3-N16R8 (双核 Xtensa LX7 @ 240MHz, 16MB Flash, 8MB PSRAM)
 
@@ -14,55 +15,20 @@
 mod tasks;
 mod sync;
 mod util;
+mod mem;
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::{
-    gpio::{Level, Output},
+    gpio::{Level, Output, OutputConfig},
     interrupt::{software::SoftwareInterruptControl, Priority},
     timer::timg::TimerGroup,
 };
-use esp_hal_embassy::InterruptExecutor;
+use esp_rtos::embassy::InterruptExecutor;
 use static_cell::StaticCell;
 
-// ===== ESP-IDF 兼容 App Descriptor (手动定义) =====
-// 设置 min_efuse_blk_rev_full = 0 以支持所有芯片版本
-#[repr(C)]
-struct EspAppDesc {
-    magic_word: u32,
-    secure_version: u32,
-    reserv1: [u32; 2],
-    version: [u8; 32],
-    project_name: [u8; 32],
-    time: [u8; 16],
-    date: [u8; 16],
-    idf_ver: [u8; 32],
-    app_elf_sha256: [u8; 32],
-    min_efuse_blk_rev_full: u16,  // 设置为 0
-    max_efuse_blk_rev_full: u16,  // 设置为 u16::MAX
-    mmu_page_size: u8,
-    reserv3: [u8; 3],
-    reserv2: [u32; 18],
-}
-
-#[link_section = ".flash.appdesc"]
-#[used]
-static ESP_APP_DESC: EspAppDesc = EspAppDesc {
-    magic_word: 0xABCD5432,
-    secure_version: 0,
-    reserv1: [0; 2],
-    version: *b"0.1.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
-    project_name: *b"rustrtos\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
-    time: *b"00:00:00\0\0\0\0\0\0\0\0",
-    date: *b"2025-01-01\0\0\0\0\0\0",
-    idf_ver: *b"v5.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
-    app_elf_sha256: [0; 32],
-    min_efuse_blk_rev_full: 0,     // 支持所有芯片版本
-    max_efuse_blk_rev_full: u16::MAX,
-    mmu_page_size: 16,  // 64KB = 2^16
-    reserv3: [0; 3],
-    reserv2: [0; 18],
-};
+// ===== ESP App Descriptor =====
+esp_bootloader_esp_idf::esp_app_desc!();
 
 // ===== 条件编译日志 =====
 #[allow(unused_imports)]
@@ -124,20 +90,20 @@ impl SystemState {
 static mut SYSTEM_STATE: SystemState = SystemState::new();
 
 // ===== 主入口点 =====
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(low_prio_spawner: Spawner) {
     // ========================================
-    // 1. 硬件初始化 (esp-hal 0.23 新 API)
+    // 1. 硬件初始化 (esp-hal 1.0 API)
     // ========================================
     let peripherals = esp_hal::init(esp_hal::Config::default());
     
-    log_info!("RustRTOS starting on ESP32-S3");
+    log_info!("RustRTOS v{} starting on ESP32-S3", env!("CARGO_PKG_VERSION"));
     
     // ========================================
-    // 2. GPIO 初始化
+    // 2. GPIO 初始化 (esp-hal 1.0 新 API)
     // ========================================
     // 板载 LED (根据实际硬件调整引脚)
-    let led = Output::new(peripherals.GPIO2, Level::Low);
+    let led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
     
     // ========================================
     // 3. 定时器初始化 (Embassy 时间驱动)
@@ -150,14 +116,15 @@ async fn main(low_prio_spawner: Spawner) {
     let sw_ints = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     
     // ========================================
-    // 5. 初始化 Embassy
+    // 5. 初始化 esp-rtos 调度器
     // ========================================
-    esp_hal_embassy::init(timg0.timer0);
+    // 注意: Xtensa 架构只需要 timer 参数，RISC-V 才需要 software_interrupt
+    esp_rtos::start(timg0.timer0);
     
-    log_info!("Embassy initialized");
+    log_info!("esp-rtos scheduler initialized");
     
     // ========================================
-    // 6. 配置高优先级执行器 (Priority3 是较高优先级)
+    // 6. 配置高优先级执行器 (Priority3 是 ESP32-S3 最高可用)
     // ========================================
     let high_prio_executor = InterruptExecutor::new(sw_ints.software_interrupt2);
     let high_prio_executor = HIGH_PRIO_EXECUTOR.init(high_prio_executor);

@@ -1,8 +1,8 @@
 //! 条件编译日志系统
 //!
 //! 根据 feature 选择不同的日志后端:
-//! - `dev` / `log-defmt`: 使用 defmt (高效二进制日志)
-//! - `log-println`: 使用 esp-println (文本日志)
+//! - `log-defmt`: 使用 defmt (高效二进制日志)
+//! - `dev` / `log-println`: 使用 esp-println (文本日志)
 //! - 默认 (release): 完全禁用日志 (零开销)
 //!
 //! # 日志级别
@@ -13,69 +13,69 @@
 //! - `trace!`: 详细跟踪
 
 // ===================================================================
-// defmt 后端 (feature = "dev" 或 "log-defmt")
+// defmt 后端 (feature = "log-defmt")
 // ===================================================================
-#[cfg(any(feature = "dev", feature = "log-defmt"))]
+#[cfg(feature = "log-defmt")]
 pub use defmt::{info, debug, warn, error, trace};
 
-#[cfg(any(feature = "dev", feature = "log-defmt"))]
+#[cfg(feature = "log-defmt")]
 #[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => { defmt::info!($($arg)*) };
 }
 
-#[cfg(any(feature = "dev", feature = "log-defmt"))]
+#[cfg(feature = "log-defmt")]
 #[macro_export]
 macro_rules! log_debug {
     ($($arg:tt)*) => { defmt::debug!($($arg)*) };
 }
 
-#[cfg(any(feature = "dev", feature = "log-defmt"))]
+#[cfg(feature = "log-defmt")]
 #[macro_export]
 macro_rules! log_warn {
     ($($arg:tt)*) => { defmt::warn!($($arg)*) };
 }
 
-#[cfg(any(feature = "dev", feature = "log-defmt"))]
+#[cfg(feature = "log-defmt")]
 #[macro_export]
 macro_rules! log_error {
     ($($arg:tt)*) => { defmt::error!($($arg)*) };
 }
 
-#[cfg(any(feature = "dev", feature = "log-defmt"))]
+#[cfg(feature = "log-defmt")]
 #[macro_export]
 macro_rules! log_trace {
     ($($arg:tt)*) => { defmt::trace!($($arg)*) };
 }
 
 // ===================================================================
-// esp-println 后端 (feature = "log-println")
+// esp-println 后端 (feature = "dev" 或 "log-println")
 // ===================================================================
-#[cfg(all(feature = "log-println", not(any(feature = "dev", feature = "log-defmt"))))]
+#[cfg(all(any(feature = "dev", feature = "log-println"), not(feature = "log-defmt")))]
 #[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => { esp_println::println!("[INFO] {}", format_args!($($arg)*)) };
 }
 
-#[cfg(all(feature = "log-println", not(any(feature = "dev", feature = "log-defmt"))))]
+#[cfg(all(any(feature = "dev", feature = "log-println"), not(feature = "log-defmt")))]
 #[macro_export]
 macro_rules! log_debug {
     ($($arg:tt)*) => { esp_println::println!("[DEBUG] {}", format_args!($($arg)*)) };
 }
 
-#[cfg(all(feature = "log-println", not(any(feature = "dev", feature = "log-defmt"))))]
+#[cfg(all(any(feature = "dev", feature = "log-println"), not(feature = "log-defmt")))]
 #[macro_export]
 macro_rules! log_warn {
     ($($arg:tt)*) => { esp_println::println!("[WARN] {}", format_args!($($arg)*)) };
 }
 
-#[cfg(all(feature = "log-println", not(any(feature = "dev", feature = "log-defmt"))))]
+#[cfg(all(any(feature = "dev", feature = "log-println"), not(feature = "log-defmt")))]
 #[macro_export]
 macro_rules! log_error {
     ($($arg:tt)*) => { esp_println::println!("[ERROR] {}", format_args!($($arg)*)) };
 }
 
-#[cfg(all(feature = "log-println", not(any(feature = "dev", feature = "log-defmt"))))]
+#[cfg(all(any(feature = "dev", feature = "log-println"), not(feature = "log-defmt")))]
 #[macro_export]
 macro_rules! log_trace {
     ($($arg:tt)*) => { esp_println::println!("[TRACE] {}", format_args!($($arg)*)) };

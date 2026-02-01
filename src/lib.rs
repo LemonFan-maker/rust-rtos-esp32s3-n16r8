@@ -1,16 +1,24 @@
 //! RustRTOS - ESP32-S3 高性能实时操作系统库
 //!
 //! 本库提供以下核心功能:
-//! - 多优先级任务调度 (基于 Embassy)
+//! - 多优先级任务调度 (基于 Embassy + esp-rtos)
+//! - 双核 SMP 支持
+//! - PSRAM 内存管理
+//! - 内存池分配器
+//! - DMA 缓冲区管理
+//! - LittleFS 文件系统
 //! - 零拷贝同步原语
 //! - 高性能环形缓冲区
 //! - 条件编译日志系统
 
 #![no_std]
+#![feature(asm_experimental_arch)]
 
 pub mod tasks;
 pub mod sync;
 pub mod util;
+pub mod mem;
+pub mod fs;
 
 // ===== 重导出常用类型 =====
 pub use sync::primitives::{
@@ -19,6 +27,27 @@ pub use sync::primitives::{
     CriticalChannel,
 };
 pub use sync::ringbuffer::RingBuffer;
+
+// 内存管理重导出
+pub use mem::{
+    psram::{CacheMode, PsramBox, PsramConfig, PsramInfo, PsramError, PsramStats},
+    pool::{MemoryPool, PoolBox},
+    dma::{DmaBuffer, DmaStrategy},
+};
+
+// 多核支持重导出
+pub use tasks::multicore::{
+    CoreId, CoreAssignment, Core1,
+    IpcChannel, IpcSignal, IpcSemaphore,
+};
+
+// 文件系统重导出
+pub use fs::{
+    FileSystem, File, OpenOptions, FileType, Metadata,
+    PartitionTable, Partition, PartitionType,
+    FlashStorage, StorageError,
+};
+
 
 // ===== 版本信息 =====
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -32,17 +61,17 @@ pub mod config {
     /// 系统 Tick 频率 (Hz) - Embassy 配置为 1MHz
     pub const TICK_FREQ_HZ: u32 = 1_000_000;
     
-    /// 高优先级中断等级
-    pub const HIGH_PRIORITY: u8 = 7;
+    /// 高优先级中断等级 (ESP32-S3 Xtensa 最高为 Priority3)
+    pub const HIGH_PRIORITY: u8 = 3;
     
     /// 中优先级中断等级
-    pub const MID_PRIORITY: u8 = 5;
+    pub const MID_PRIORITY: u8 = 2;
     
     /// 低优先级中断等级
-    pub const LOW_PRIORITY: u8 = 3;
+    pub const LOW_PRIORITY: u8 = 1;
     
-    /// 核间通信中断等级 (预留)
-    pub const IPC_PRIORITY: u8 = 6;
+    /// 核间通信中断等级
+    pub const IPC_PRIORITY: u8 = 2;
     
     /// 默认任务栈大小 (字节)
     pub const DEFAULT_STACK_SIZE: usize = 4096;
@@ -52,37 +81,16 @@ pub mod config {
     
     /// 环形缓冲区默认大小
     pub const DEFAULT_RINGBUF_SIZE: usize = 256;
-}
-
-/// 内存区域标记
-pub mod mem {
-    /// 标记数据应放入 DRAM (快速内部 RAM)
-    /// 用于频繁访问的数据
-    #[macro_export]
-    macro_rules! dram_data {
-        ($item:item) => {
-            #[link_section = ".dram.data"]
-            $item
-        };
-    }
     
-    /// 标记数据应放入 IRAM (指令 RAM)
-    /// 用于中断处理函数
-    #[macro_export]
-    macro_rules! iram_text {
-        ($item:item) => {
-            #[link_section = ".iram.text"]
-            $item
-        };
-    }
+    /// PSRAM 基地址
+    pub const PSRAM_BASE: u32 = 0x3C000000;
     
-    /// 标记数据应放入 PSRAM (外部 RAM)
-    /// 仅用于大型非关键数据缓冲区
-    #[macro_export]
-    macro_rules! psram_data {
-        ($item:item) => {
-            #[link_section = ".psram.data"]
-            $item
-        };
-    }
+    /// PSRAM 大小 (8MB for N16R8)
+    pub const PSRAM_SIZE: usize = 8 * 1024 * 1024;
+    
+    /// DMA 缓冲区对齐 (cache line)
+    pub const DMA_ALIGNMENT: usize = 32;
+    
+    /// 默认 Flash 块大小
+    pub const FLASH_BLOCK_SIZE: u32 = 4096;
 }

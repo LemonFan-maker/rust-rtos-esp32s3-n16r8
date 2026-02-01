@@ -1,12 +1,12 @@
 //! 高优先级关键任务
 //!
-//! 本模块中的任务运行在 InterruptExecutor (Priority 7) 上，
+//! 本模块中的任务运行在 InterruptExecutor (Priority3) 上，
 //! 具有最高调度优先级，适用于:
 //! - 传感器实时采样
 //! - 电机控制
 //! - 安全关键操作
 //!
-//! 所有关键函数使用 `#[ram]` 宏放入 IRAM，避免 Flash 访问延迟
+//! 所有关键函数使用 `#[esp_hal::ram]` 宏放入 IRAM，避免 Flash 访问延迟
 
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::ram;
@@ -28,12 +28,12 @@ pub static SENSOR_READY: CriticalSignal<u32> = CriticalSignal::new();
 // ===== 高优先级任务: 传感器采样 =====
 /// 关键传感器采样任务
 ///
-/// 运行在 Priority 7 中断执行器上，每 100μs 采样一次
+/// 运行在 Priority3 中断执行器上，每 100μs 采样一次
 /// 目标延迟: < 1μs 响应时间
 #[embassy_executor::task]
 #[ram] // 关键: 放入 IRAM 避免 Flash 访问延迟
 pub async fn critical_sensor_task() {
-    log_info!("Critical sensor task started (Priority 7, IRAM)");
+    log_info!("Critical sensor task started (Priority3, IRAM)");
     
     let mut last_time = Instant::now();
     let mut max_jitter: u64 = 0;

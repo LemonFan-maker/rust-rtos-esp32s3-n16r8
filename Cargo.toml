@@ -1,23 +1,25 @@
 [package]
 name = "rustrtos"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "A high-performance RTOS for ESP32-S3 based on Embassy"
+description = "A high-performance RTOS for ESP32-S3 based on Embassy and esp-hal 1.0"
 authors = ["RustRTOS Team"]
 
 [dependencies]
-# ===== ESP-HAL 核心 =====
-# 使用最新稳定版本以兼容新版 esp 工具链
-esp-hal = { version = "0.23", features = ["esp32s3"] }
-esp-hal-embassy = { version = "0.6", features = ["esp32s3"] }
-esp-backtrace = { version = "0.15", features = ["esp32s3", "panic-handler", "exception-handler", "defmt"], optional = true }
-esp-println = { version = "0.13", features = ["esp32s3"], optional = true }
+# ===== ESP-HAL 1.0 核心 =====
+esp-hal = { version = "1.0", features = ["esp32s3", "unstable", "psram"] }
+esp-rtos = { version = "0.2", features = ["esp32s3", "embassy"] }
+esp-alloc = "0.9"
+esp-backtrace = { version = "0.18", features = ["esp32s3", "panic-handler", "println"], optional = true }
+esp-println = { version = "0.16", features = ["esp32s3", "auto"], optional = true }
+esp-bootloader-esp-idf = { version = "0.4", features = ["esp32s3"] }
 
 # ===== Embassy 异步运行时 =====
-embassy-executor = { version = "0.7" }
+# 注意: esp-rtos 0.2 要求 embassy-executor 0.9
+embassy-executor = { version = "0.9" }
 embassy-time = { version = "0.4" }
-embassy-sync = { version = "0.6" }
+embassy-sync = { version = "0.7" }
 embassy-futures = { version = "0.1" }
 
 # ===== 静态分配 =====
@@ -26,29 +28,30 @@ heapless = "0.8"
 
 # ===== 同步原语 =====
 critical-section = "1.2"
-portable-atomic = { version = "1.9", default-features = false, features = ["critical-section"] }
+portable-atomic = { version = "1.11", default-features = false, features = ["critical-section"] }
 
 # ===== 可选: defmt 日志 =====
-defmt = { version = "0.3", features = [], optional = true }
-defmt-rtt = { version = "0.4", optional = true }
+defmt = { version = "1.0", features = [], optional = true }
+defmt-rtt = { version = "1.0", optional = true }
 
 # ===== 嵌入式基础 =====
 embedded-hal = "1.0"
 embedded-hal-async = "1.0"
 
+# ===== 文件系统 =====
+littlefs2 = "0.4"
+embedded-storage = "0.3"
+
 [features]
 default = []
 
-# 开发模式 - 启用完整日志和调试
+# 开发模式 - 启用 esp-println 日志和调试
 dev = [
-    "defmt",
-    "defmt-rtt",
     "esp-backtrace",
     "esp-println",
-    "esp-hal/defmt",
 ]
 
-# 仅 defmt 日志
+# 仅 defmt 日志 (需要额外配置)
 log-defmt = ["defmt", "defmt-rtt", "esp-hal/defmt"]
 
 # 仅 esp-println 日志
@@ -69,7 +72,7 @@ incremental = true
 [profile.dev.package.esp-hal]
 opt-level = 3
 
-[profile.dev.package.esp-hal-embassy]
+[profile.dev.package.esp-rtos]
 opt-level = 3
 
 [profile.dev.package.embassy-executor]
@@ -127,3 +130,27 @@ path = "examples/multi_priority.rs"
 [[example]]
 name = "benchmark"
 path = "examples/benchmark.rs"
+
+[[example]]
+name = "psram_demo"
+path = "examples/psram_demo.rs"
+
+[[example]]
+name = "memory_pool"
+path = "examples/memory_pool.rs"
+
+[[example]]
+name = "dma_transfer"
+path = "examples/dma_transfer.rs"
+
+[[example]]
+name = "dual_core"
+path = "examples/dual_core.rs"
+
+[[example]]
+name = "filesystem"
+path = "examples/filesystem.rs"
+
+[[example]]
+name = "benchmark_memory"
+path = "examples/benchmark_memory.rs"
