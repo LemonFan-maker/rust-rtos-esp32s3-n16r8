@@ -19,40 +19,65 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::{
-    clock::ClockControl,
-    interrupt::{software::SoftwareInterruptControl, Priority},
-    peripherals::Peripherals,
-    prelude::*,
-    system::SystemControl,
     timer::timg::TimerGroup,
-    macros::ram,
 };
-use esp_rtos::embassy::InterruptExecutor;
 use portable_atomic::{AtomicU32, AtomicU64, Ordering};
-use static_cell::StaticCell;
 use core::cell::UnsafeCell;
 
+// ===== ESP-IDF 兼容 App Descriptor =====
+#[repr(C)]
+struct EspAppDesc {
+    magic_word: u32,
+    secure_version: u32,
+    reserv1: [u32; 2],
+    version: [u8; 32],
+    project_name: [u8; 32],
+    time: [u8; 16],
+    date: [u8; 16],
+    idf_ver: [u8; 32],
+    app_elf_sha256: [u8; 32],
+    min_efuse_blk_rev_full: u16,
+    max_efuse_blk_rev_full: u16,
+    mmu_page_size: u8,
+    reserv3: [u8; 3],
+    reserv2: [u32; 18],
+}
+
+#[link_section = ".flash.appdesc"]
+#[used]
+static ESP_APP_DESC: EspAppDesc = EspAppDesc {
+    magic_word: 0xABCD5432,
+    secure_version: 0,
+    reserv1: [0; 2],
+    version: *b"0.1.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    project_name: *b"benchmark\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    time: *b"00:00:00\0\0\0\0\0\0\0\0",
+    date: *b"2025-01-01\0\0\0\0\0\0",
+    idf_ver: *b"v5.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    app_elf_sha256: [0; 32],
+    min_efuse_blk_rev_full: 0,
+    max_efuse_blk_rev_full: u16::MAX,
+    mmu_page_size: 16,
+    reserv3: [0; 3],
+    reserv2: [0; 18],
+};
+
 // ===== 日志 =====
+// 使用 esp-println 以便通过串口查看输出
+use esp_println::println as info;
+
+// 同时保留 defmt-rtt 以满足链接需求
 #[cfg(feature = "dev")]
 use defmt_rtt as _;
 
-#[cfg(feature = "dev")]
-use defmt::info;
-
-#[cfg(not(feature = "dev"))]
-macro_rules! info { ($($t:tt)*) => {} }
-
-#[cfg(feature = "dev")]
 use esp_backtrace as _;
 
-#[cfg(not(feature = "dev"))]
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
+// defmt panic handler (即使不直接使用 defmt，embassy 内部可能需要)
+#[cfg(feature = "dev")]
+#[defmt::panic_handler]
+fn panic() -> ! {
     loop { core::hint::spin_loop(); }
 }
-
-// ===== 静态分配 =====
-static HIGH_PRIO_EXECUTOR: StaticCell<InterruptExecutor<2>> = StaticCell::new();
 
 // ===== 测试状态 =====
 static PING_SIGNAL: Signal<CriticalSectionRawMutex, Instant> = Signal::new();
@@ -125,7 +150,6 @@ static TEST_BUFFER: TestRingBuffer = TestRingBuffer::new();
 
 // ===== 高优先级任务: 延迟测量响应端 =====
 #[embassy_executor::task]
-#[ram]
 async fn high_prio_responder() {
     info!("High priority responder started");
     
@@ -349,36 +373,24 @@ async fn benchmark_task() {
 }
 
 // ===== 主入口 =====
-#[esp_rtos::main]
+#[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::max(system.clock_control).freeze();
+    let peripherals = esp_hal::init(esp_hal::Config::default());
     
     info!("========================================");
     info!("  RustRTOS Benchmark Suite");
-    info!("  ESP32-S3 @ {}MHz", clocks.cpu_clock.to_MHz());
+    info!("  ESP32-S3 @ 240MHz");
     info!("========================================");
     
-    // 定时器
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
+    // 初始化 Embassy 时间驱动
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_hal_embassy::init(timg0.timer0);
     
-    // 软件中断
-    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    
-    // 启动 esp-rtos
-    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
-    
-    // 高优先级执行器
-    let high_prio_executor = InterruptExecutor::new(sw_int.software_interrupt2);
-    let high_prio_executor = HIGH_PRIO_EXECUTOR.init(high_prio_executor);
-    let high_prio_spawner = high_prio_executor.start(Priority::Priority7);
-    
-    // 启动高优先级响应任务
-    high_prio_spawner.must_spawn(high_prio_responder());
+    // 启动高优先级响应任务（在同一个执行器中运行）
+    spawner.spawn(high_prio_responder()).ok();
     
     // 启动基准测试任务
-    spawner.must_spawn(benchmark_task());
+    spawner.spawn(benchmark_task()).ok();
     
     // 主循环
     loop {

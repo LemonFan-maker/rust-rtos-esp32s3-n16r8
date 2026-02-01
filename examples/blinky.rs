@@ -16,33 +16,62 @@
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::{
-    clock::ClockControl,
-    gpio::{Io, Level, Output},
-    peripherals::Peripherals,
-    prelude::*,
-    system::SystemControl,
+    gpio::{Level, Output},
     timer::timg::TimerGroup,
 };
 
-// 条件编译: 开发模式使用 defmt
+// 日志输出
+use esp_println::println as info;
+
+// defmt 支持（用于 embassy）
 #[cfg(feature = "dev")]
 use defmt_rtt as _;
 
-#[cfg(feature = "dev")]
-use defmt::info;
-
-#[cfg(not(feature = "dev"))]
-macro_rules! info { ($($t:tt)*) => {} }
-
-// Panic handler
-#[cfg(feature = "dev")]
 use esp_backtrace as _;
 
-#[cfg(not(feature = "dev"))]
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
+#[cfg(feature = "dev")]
+#[defmt::panic_handler]
+fn defmt_panic() -> ! {
     loop { core::hint::spin_loop(); }
 }
+
+// ESP-IDF App Descriptor
+#[repr(C)]
+struct EspAppDesc {
+    magic_word: u32,
+    secure_version: u32,
+    reserv1: [u32; 2],
+    version: [u8; 32],
+    project_name: [u8; 32],
+    time: [u8; 16],
+    date: [u8; 16],
+    idf_ver: [u8; 32],
+    app_elf_sha256: [u8; 32],
+    min_efuse_blk_rev_full: u16,
+    max_efuse_blk_rev_full: u16,
+    mmu_page_size: u8,
+    reserv3: [u8; 3],
+    reserv2: [u32; 18],
+}
+
+#[link_section = ".flash.appdesc"]
+#[used]
+static ESP_APP_DESC: EspAppDesc = EspAppDesc {
+    magic_word: 0xABCD5432,
+    secure_version: 0,
+    reserv1: [0; 2],
+    version: *b"0.1.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    project_name: *b"blinky\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    time: *b"00:00:00\0\0\0\0\0\0\0\0",
+    date: *b"2025-01-01\0\0\0\0\0\0",
+    idf_ver: *b"v5.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    app_elf_sha256: [0; 32],
+    min_efuse_blk_rev_full: 0,
+    max_efuse_blk_rev_full: u16::MAX,
+    mmu_page_size: 16,
+    reserv3: [0; 3],
+    reserv2: [0; 18],
+};
 
 /// LED 闪烁任务
 #[embassy_executor::task]
@@ -66,34 +95,23 @@ async fn blink_task(mut led: Output<'static>) {
     }
 }
 
-#[esp_rtos::main]
+#[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    // 初始化外设
-    let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::max(system.clock_control).freeze();
+    let peripherals = esp_hal::init(esp_hal::Config::default());
     
-    info!("Blinky example starting on ESP32-S3 @ {}MHz", clocks.cpu_clock.to_MHz());
+    info!("Blinky example starting on ESP32-S3 @ 240MHz");
     
-    // 初始化 GPIO
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
+    // 初始化 Embassy 时间驱动
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_hal_embassy::init(timg0.timer0);
     
     // 配置 LED 引脚 (GPIO2 是很多开发板的板载 LED)
-    let led = Output::new(io.pins.gpio2, Level::Low);
-    
-    // 初始化定时器
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
-    
-    // 初始化 esp-rtos
-    let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(
-        peripherals.SW_INTERRUPT
-    );
-    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+    let led = Output::new(peripherals.GPIO2, Level::Low);
     
     info!("Spawning blink task...");
     
     // 启动 LED 闪烁任务
-    spawner.must_spawn(blink_task(led));
+    spawner.spawn(blink_task(led)).ok();
     
     // 主循环保持运行
     loop {

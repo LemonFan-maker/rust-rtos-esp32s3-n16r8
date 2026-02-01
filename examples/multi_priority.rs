@@ -24,41 +24,67 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer, Ticker};
 use esp_hal::{
-    clock::ClockControl,
-    gpio::{Io, Level, Output},
-    interrupt::{software::SoftwareInterruptControl, Priority},
-    peripherals::Peripherals,
-    prelude::*,
-    system::SystemControl,
+    gpio::{Level, Output},
     timer::timg::TimerGroup,
-    macros::ram,
 };
-use esp_rtos::embassy::InterruptExecutor;
+use esp_hal_embassy::InterruptExecutor;
 use portable_atomic::{AtomicU32, AtomicU64, Ordering};
 use static_cell::StaticCell;
 
-// ===== 条件编译日志 =====
+// 日志输出
+use esp_println::println as info;
+macro_rules! debug { ($($t:tt)*) => { esp_println::println!($($t)*) } }
+macro_rules! warn { ($($t:tt)*) => { esp_println::println!("WARN: {}", format_args!($($t)*)) } }
+
+// defmt 支持
 #[cfg(feature = "dev")]
 use defmt_rtt as _;
 
-#[cfg(feature = "dev")]
-use defmt::{info, debug, warn};
-
-#[cfg(not(feature = "dev"))]
-macro_rules! info { ($($t:tt)*) => {} }
-#[cfg(not(feature = "dev"))]
-macro_rules! debug { ($($t:tt)*) => {} }
-#[cfg(not(feature = "dev"))]
-macro_rules! warn { ($($t:tt)*) => {} }
-
-#[cfg(feature = "dev")]
 use esp_backtrace as _;
 
-#[cfg(not(feature = "dev"))]
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
+#[cfg(feature = "dev")]
+#[defmt::panic_handler]
+fn defmt_panic() -> ! {
     loop { core::hint::spin_loop(); }
 }
+
+// ESP-IDF App Descriptor
+#[repr(C)]
+struct EspAppDesc {
+    magic_word: u32,
+    secure_version: u32,
+    reserv1: [u32; 2],
+    version: [u8; 32],
+    project_name: [u8; 32],
+    time: [u8; 16],
+    date: [u8; 16],
+    idf_ver: [u8; 32],
+    app_elf_sha256: [u8; 32],
+    min_efuse_blk_rev_full: u16,
+    max_efuse_blk_rev_full: u16,
+    mmu_page_size: u8,
+    reserv3: [u8; 3],
+    reserv2: [u32; 18],
+}
+
+#[link_section = ".flash.appdesc"]
+#[used]
+static ESP_APP_DESC: EspAppDesc = EspAppDesc {
+    magic_word: 0xABCD5432,
+    secure_version: 0,
+    reserv1: [0; 2],
+    version: *b"0.1.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    project_name: *b"multi_priority\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    time: *b"00:00:00\0\0\0\0\0\0\0\0",
+    date: *b"2025-01-01\0\0\0\0\0\0",
+    idf_ver: *b"v5.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    app_elf_sha256: [0; 32],
+    min_efuse_blk_rev_full: 0,
+    max_efuse_blk_rev_full: u16::MAX,
+    mmu_page_size: 16,
+    reserv3: [0; 3],
+    reserv2: [0; 18],
+};
 
 // ===== 静态分配 =====
 static HIGH_PRIO_EXECUTOR: StaticCell<InterruptExecutor<2>> = StaticCell::new();
@@ -84,9 +110,8 @@ static MAX_JITTER: AtomicU32 = AtomicU32::new(0);
 // ===== 高优先级任务 (Priority 7) =====
 /// 关键传感器任务 - 每 100μs 执行
 #[embassy_executor::task]
-#[ram] // IRAM 执行，最小延迟
 async fn high_priority_task() {
-    info!("High priority task started (P7, IRAM)");
+    info!("High priority task started (P7)");
     
     let mut last_time = Instant::now();
     let target_period_us: u64 = 100;
@@ -127,7 +152,6 @@ async fn high_priority_task() {
 
 /// 模拟传感器读取
 #[inline(always)]
-#[ram]
 fn simulate_sensor() -> u32 {
     static SEED: AtomicU32 = AtomicU32::new(12345);
     let current = SEED.load(Ordering::Relaxed);
@@ -205,54 +229,32 @@ async fn stats_task() {
 }
 
 // ===== 主入口 =====
-#[esp_rtos::main]
-async fn main(low_prio_spawner: Spawner) {
-    // 初始化硬件
-    let peripherals = Peripherals::take();
-    let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::max(system.clock_control).freeze();
+#[esp_hal_embassy::main]
+async fn main(spawner: Spawner) {
+    let peripherals = esp_hal::init(esp_hal::Config::default());
     
-    info!("Multi-priority example on ESP32-S3 @ {}MHz", clocks.cpu_clock.to_MHz());
+    info!("Multi-priority example on ESP32-S3 @ 240MHz");
+    
+    // 初始化 Embassy 时间驱动
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_hal_embassy::init(timg0.timer0);
     
     // GPIO
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-    let led = Output::new(io.pins.gpio2, Level::Low);
+    let led = Output::new(peripherals.GPIO2, Level::Low);
     
-    // 定时器
-    let timg0 = TimerGroup::new(peripherals.TIMG0, &clocks);
+    info!("Note: This simplified version runs all tasks in single executor");
+    info!("For true multi-priority, use esp-hal 1.0+ with InterruptExecutor");
     
-    // 软件中断
-    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    
-    // 启动 esp-rtos
-    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
-    info!("esp-rtos started");
-    
-    // ===== 高优先级执行器 (Priority 7) =====
-    let high_prio_executor = InterruptExecutor::new(sw_int.software_interrupt2);
-    let high_prio_executor = HIGH_PRIO_EXECUTOR.init(high_prio_executor);
-    let high_prio_spawner = high_prio_executor.start(Priority::Priority7);
-    
-    high_prio_spawner.must_spawn(high_priority_task());
-    info!("High priority executor started (P7)");
-    
-    // ===== 中优先级执行器 (Priority 5) =====
-    let mid_prio_executor = InterruptExecutor::new(sw_int.software_interrupt1);
-    let mid_prio_executor = MID_PRIO_EXECUTOR.init(mid_prio_executor);
-    let mid_prio_spawner = mid_prio_executor.start(Priority::Priority5);
-    
-    mid_prio_spawner.must_spawn(mid_priority_task());
-    info!("Mid priority executor started (P5)");
-    
-    // ===== 低优先级任务 =====
-    low_prio_spawner.must_spawn(led_task(led));
-    low_prio_spawner.must_spawn(stats_task());
-    info!("Low priority tasks spawned");
+    // 启动所有任务（在单执行器中运行）
+    spawner.spawn(high_priority_task()).ok();
+    spawner.spawn(mid_priority_task()).ok();
+    spawner.spawn(led_task(led)).ok();
+    spawner.spawn(stats_task()).ok();
     
     info!("=== All tasks running ===");
-    info!("High (P7): 100μs period - sensor sampling");
-    info!("Mid (P5):  10ms period  - data processing");
-    info!("Low:       background   - stats & LED");
+    info!("High: 100μs period - sensor sampling");
+    info!("Mid:  10ms period  - data processing");
+    info!("Low:  background   - stats & LED");
     
     // 主循环
     loop {
