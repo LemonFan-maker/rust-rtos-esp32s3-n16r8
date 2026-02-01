@@ -95,6 +95,11 @@ strip = "symbols"
 incremental = false
 rpath = false
 
+# Build script 配置
+[package.metadata.espflash]
+# 这些选项在使用 espflash 时会自动应用
+# 不再需要 --ignore-app-descriptor 因为我们提供了正确的 App Descriptor
+
 # =============================================
 # Release-Size Profile - 最小体积
 # =============================================

@@ -10,6 +10,8 @@ runner = "espflash flash --monitor"
 
 rustflags = [
     # ===== 链接脚本 =====
+    # 自定义链接脚本目录 - 必须在前面以覆盖 esp-hal 的 rodata.x
+    "-C", "link-arg=-L./ld",
     "-C", "link-arg=-Tlinkall.x",
     
     # ===== 链接优化 =====

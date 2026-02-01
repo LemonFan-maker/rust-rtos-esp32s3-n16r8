@@ -25,6 +25,45 @@ use esp_hal::{
 use esp_hal_embassy::InterruptExecutor;
 use static_cell::StaticCell;
 
+// ===== ESP-IDF 兼容 App Descriptor (手动定义) =====
+// 设置 min_efuse_blk_rev_full = 0 以支持所有芯片版本
+#[repr(C)]
+struct EspAppDesc {
+    magic_word: u32,
+    secure_version: u32,
+    reserv1: [u32; 2],
+    version: [u8; 32],
+    project_name: [u8; 32],
+    time: [u8; 16],
+    date: [u8; 16],
+    idf_ver: [u8; 32],
+    app_elf_sha256: [u8; 32],
+    min_efuse_blk_rev_full: u16,  // 设置为 0
+    max_efuse_blk_rev_full: u16,  // 设置为 u16::MAX
+    mmu_page_size: u8,
+    reserv3: [u8; 3],
+    reserv2: [u32; 18],
+}
+
+#[link_section = ".flash.appdesc"]
+#[used]
+static ESP_APP_DESC: EspAppDesc = EspAppDesc {
+    magic_word: 0xABCD5432,
+    secure_version: 0,
+    reserv1: [0; 2],
+    version: *b"0.1.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    project_name: *b"rustrtos\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    time: *b"00:00:00\0\0\0\0\0\0\0\0",
+    date: *b"2025-01-01\0\0\0\0\0\0",
+    idf_ver: *b"v5.0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+    app_elf_sha256: [0; 32],
+    min_efuse_blk_rev_full: 0,     // 支持所有芯片版本
+    max_efuse_blk_rev_full: u16::MAX,
+    mmu_page_size: 16,  // 64KB = 2^16
+    reserv3: [0; 3],
+    reserv2: [0; 18],
+};
+
 // ===== 条件编译日志 =====
 #[allow(unused_imports)]
 use crate::util::log::*;
