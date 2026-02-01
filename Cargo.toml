@@ -1,0 +1,123 @@
+[package]
+name = "rustrtos"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A high-performance RTOS for ESP32-S3 based on Embassy"
+authors = ["RustRTOS Team"]
+
+[dependencies]
+# ===== ESP-HAL 核心 =====
+# 使用最新稳定版本以兼容新版 esp 工具链
+esp-hal = { version = "0.23", features = ["esp32s3"] }
+esp-hal-embassy = { version = "0.6", features = ["esp32s3"] }
+esp-backtrace = { version = "0.15", features = ["esp32s3", "panic-handler", "exception-handler", "defmt"], optional = true }
+esp-println = { version = "0.13", features = ["esp32s3"], optional = true }
+
+# ===== Embassy 异步运行时 =====
+embassy-executor = { version = "0.7" }
+embassy-time = { version = "0.4" }
+embassy-sync = { version = "0.6" }
+embassy-futures = { version = "0.1" }
+
+# ===== 静态分配 =====
+static_cell = "2.1"
+heapless = "0.8"
+
+# ===== 同步原语 =====
+critical-section = "1.2"
+portable-atomic = { version = "1.9", default-features = false, features = ["critical-section"] }
+
+# ===== 可选: defmt 日志 =====
+defmt = { version = "0.3", features = [], optional = true }
+defmt-rtt = { version = "0.4", optional = true }
+
+# ===== 嵌入式基础 =====
+embedded-hal = "1.0"
+embedded-hal-async = "1.0"
+
+[features]
+default = []
+
+# 开发模式 - 启用完整日志和调试
+dev = [
+    "defmt",
+    "defmt-rtt",
+    "esp-backtrace",
+    "esp-hal/defmt",
+]
+
+# 仅 defmt 日志
+log-defmt = ["defmt", "defmt-rtt", "esp-hal/defmt"]
+
+# 仅 esp-println 日志
+log-println = ["esp-println", "esp-backtrace"]
+
+# =============================================
+# Profile 配置 - 最激进性能优化
+# =============================================
+
+[profile.dev]
+opt-level = 1
+debug = true
+overflow-checks = true
+lto = false
+incremental = true
+
+# 开发模式下也优化关键依赖
+[profile.dev.package.esp-hal]
+opt-level = 3
+
+[profile.dev.package.esp-hal-embassy]
+opt-level = 3
+
+[profile.dev.package.embassy-executor]
+opt-level = 3
+
+[profile.dev.package.embassy-time]
+opt-level = 3
+
+[profile.dev.package.critical-section]
+opt-level = 3
+
+# =============================================
+# Release Profile - 最大性能
+# =============================================
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false
+debug-assertions = false
+overflow-checks = false
+panic = "abort"
+strip = "symbols"
+incremental = false
+rpath = false
+
+# =============================================
+# Release-Size Profile - 最小体积
+# =============================================
+[profile.release-size]
+inherits = "release"
+opt-level = "z"
+
+# =============================================
+# Bench Profile - 性能测试
+# =============================================
+[profile.bench]
+inherits = "release"
+debug = true
+strip = "none"
+
+[[example]]
+name = "blinky"
+path = "examples/blinky.rs"
+
+[[example]]
+name = "multi_priority"
+path = "examples/multi_priority.rs"
+
+[[example]]
+name = "benchmark"
+path = "examples/benchmark.rs"

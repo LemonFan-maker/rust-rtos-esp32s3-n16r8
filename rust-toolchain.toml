@@ -1,0 +1,10 @@
+# ==============================================
+# ESP32-S3 Xtensa Rust 工具链配置
+# ==============================================
+# 需要先安装 espup: cargo install espup
+# 然后运行: espup install
+# ==============================================
+
+[toolchain]
+channel = "esp"
+components = ["rust-src", "rustfmt", "clippy"]
