@@ -53,8 +53,8 @@ use rustrtos::net::tcp::{TcpClient, NetworkStack, StackConfig, Ipv4Address};
 use rustrtos::net::config::WIFI_EVENT_QUEUE_SIZE;
 
 // ===== 配置 =====
-const WIFI_SSID: &str = "ESP32S3";
-const WIFI_PASSWORD: &str = "213213213";
+const WIFI_SSID: &str = "SSID";
+const WIFI_PASSWORD: &str = "PASSWD";
 
 // iperf 服务器地址 (需要在局域网内运行 iperf -s)
 const IPERF_SERVER_IP: [u8; 4] = [192, 168, 1, 100];
