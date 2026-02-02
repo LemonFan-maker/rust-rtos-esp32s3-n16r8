@@ -10,6 +10,9 @@
 //! - 零拷贝同步原语
 //! - 高性能环形缓冲区
 //! - 条件编译日志系统
+//! - WiFi 网络连接 (可选, 需启用 `wifi` feature)
+//! - BLE 低功耗蓝牙 (可选, 需启用 `ble` feature)
+//! - TCP/IP 网络栈 (可选, 需启用 `network` feature)
 
 #![no_std]
 #![feature(asm_experimental_arch)]
@@ -19,6 +22,10 @@ pub mod sync;
 pub mod util;
 pub mod mem;
 pub mod fs;
+
+// ===== 网络模块 (条件编译) =====
+#[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
+pub mod net;
 
 // ===== 重导出常用类型 =====
 pub use sync::primitives::{
@@ -47,6 +54,19 @@ pub use fs::{
     PartitionTable, Partition, PartitionType,
     FlashStorage, StorageError,
 };
+
+// ===== 网络模块重导出 (条件编译) =====
+#[cfg(feature = "wifi")]
+pub use net::wifi::{WifiController, WifiMode, WifiEvent, WifiError, WifiState, ScanResult};
+
+#[cfg(any(feature = "ble", feature = "ble-esp"))]
+pub use net::ble::{BleController, BleEvent, BleError, BleState, AdvertiseConfig};
+
+#[cfg(feature = "network")]
+pub use net::tcp::{TcpClient, TcpServer, UdpSocket, NetworkStack, NetworkError};
+
+#[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
+pub use net::config::NetworkConfig;
 
 
 // ===== 版本信息 =====

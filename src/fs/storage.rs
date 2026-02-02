@@ -307,32 +307,57 @@ impl FlashStorage {
     }
 
     /// 写入单个页面
+    ///
+    /// # Safety
+    /// 调用者必须确保地址有效且在分区范围内。
+    ///
+    /// # 实现说明
+    /// ESP32-S3 内部 Flash 写入需要使用 ROM 函数。
+    /// 直接内存映射只能读取，不能写入。
+    ///
+    /// 当前为占位实现，返回 Ok 但不执行实际写入。
+    /// 实际应用中应使用 esp-storage crate 或 esp-hal 的 flash API。
     unsafe fn write_page_internal(&mut self, _address: u32, _data: &[u8]) -> Result<(), StorageError> {
-        // 实际实现需要:
-        // 1. 发送 Write Enable 命令 (0x06)
-        // 2. 发送 Page Program 命令 (0x02) + 地址 + 数据
-        // 3. 等待 Write In Progress 位清零
-        
-        // 使用 esp-hal 的 SPI Flash 驱动
-        // 或调用 ROM 函数: esp_rom_spiflash_write
-        
-        // TODO: 集成 esp-hal flash 驱动
-        
+        // 实现步骤:
+        // 1. 禁用中断和 Cache
+        // 2. 发送 Write Enable 命令 (0x06)
+        // 3. 发送 Page Program 命令 (0x02) + 地址 + 数据
+        // 4. 轮询 Status Register 等待 WIP 位清零
+        // 5. 恢复 Cache 和中断
+        //
+        // 可选方案:
+        // - esp-storage crate: https://github.com/esp-rs/esp-storage
+        // - esp_rom_spiflash_write() ROM 函数
+        //
+        // 占位实现 - 返回 Ok 但不执行实际写入
+        // 这允许编译和基本测试，但不会持久化数据
         Ok(())
     }
 
     /// 擦除单个扇区
+    ///
+    /// # Safety
+    /// 调用者必须确保地址有效且在分区范围内。
+    ///
+    /// # 实现说明
+    /// 扇区擦除通常需要几十到几百毫秒。
+    ///
+    /// 当前为占位实现，返回 Ok 但不执行实际擦除。
+    /// 实际应用中应使用 esp-storage crate 或 esp-hal 的 flash API。
     unsafe fn erase_sector_internal(&mut self, _address: u32) -> Result<(), StorageError> {
-        // 实际实现需要:
-        // 1. 发送 Write Enable 命令 (0x06)
-        // 2. 发送 Sector Erase 命令 (0x20) + 地址
-        // 3. 等待擦除完成 (通常需要几十到几百毫秒)
-        
-        // 使用 esp-hal 的 SPI Flash 驱动
-        // 或调用 ROM 函数: esp_rom_spiflash_erase_sector
-        
-        // TODO: 集成 esp-hal flash 驱动
-        
+        // 实现步骤:
+        // 1. 禁用中断和 Cache
+        // 2. 发送 Write Enable 命令 (0x06)
+        // 3. 发送 Sector Erase 命令 (0x20) + 地址
+        // 4. 轮询 Status Register 等待擦除完成 (通常 50-200ms)
+        // 5. 恢复 Cache 和中断
+        //
+        // 可选方案:
+        // - esp-storage crate: https://github.com/esp-rs/esp-storage
+        // - esp_rom_spiflash_erase_sector() ROM 函数
+        //
+        // 占位实现 - 返回 Ok 但不执行实际擦除
+        // 这允许编译和基本测试，但不会修改 Flash 内容
         Ok(())
     }
 }
@@ -366,15 +391,19 @@ impl<'d> ExternalFlash<'d> {
     }
 
     /// 读取 JEDEC ID
+    ///
+    /// 当前为占位实现，返回全零 ID。
+    /// 实际应用应使用 `SpiDmaBus::transfer()` 执行 SPI 传输。
     pub fn read_jedec_id(&mut self) -> Result<[u8; 3], StorageError> {
         let _spi = self._spi.as_mut().ok_or(StorageError::NotInitialized)?;
         
-        // 发送 JEDEC ID 命令 (0x9F)
-        // let cmd = [0x9F];
-        let mut id = [0u8; 3];
+        // JEDEC ID 命令: 0x9F
+        // 响应: 3 字节 (Manufacturer, Memory Type, Capacity)
+        let id = [0u8; 3];
         
-        // TODO: 实际 SPI 传输
-        // spi.transfer(&cmd, &mut id)?;
+        // 占位实现 - 实际应用应使用 SPI 传输:
+        // let cmd = [0x9F];
+        // self._spi.transfer(&cmd, &mut id)?;
         
         Ok(id)
     }

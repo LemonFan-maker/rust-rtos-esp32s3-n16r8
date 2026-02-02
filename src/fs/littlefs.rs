@@ -431,6 +431,14 @@ impl FileSystem {
     }
 
     /// 挂载文件系统
+    ///
+    /// # 实现说明
+    /// 当前使用简化的魔数检查。完整实现应使用 littlefs2 crate:
+    /// ```ignore
+    /// use littlefs2::fs::Filesystem;
+    /// let mut alloc = Filesystem::allocate();
+    /// Filesystem::mount(&mut alloc, storage)?;
+    /// ```
     pub fn mount(&mut self) -> Result<(), FsError> {
         if self.mounted {
             return Ok(());
@@ -439,10 +447,8 @@ impl FileSystem {
         // 初始化存储
         self.storage.inner_mut().init()?;
 
-        // TODO: 调用 littlefs2 的 mount 函数
-        // lfs_mount(&mut self.lfs, &self.config)
-        
-        // 尝试读取超级块验证文件系统
+        // 简化实现: 读取超级块验证魔数
+        // 完整实现应使用 littlefs2::fs::Filesystem::mount()
         let mut buffer = [0u8; 4096];
         self.storage.read(0, 0, &mut buffer)?;
         
@@ -456,6 +462,9 @@ impl FileSystem {
     }
 
     /// 卸载文件系统
+    ///
+    /// # 实现说明
+    /// 完整实现应使用 littlefs2 crate 的 unmount 方法。
     pub fn unmount(&mut self) -> Result<(), FsError> {
         if !self.mounted {
             return Ok(());
@@ -464,14 +473,22 @@ impl FileSystem {
         // 同步所有数据
         self.storage.sync()?;
 
-        // TODO: 调用 littlefs2 的 unmount 函数
-        // lfs_unmount(&mut self.lfs)
+        // 简化实现: 仅更新状态
+        // 完整实现应调用 littlefs2::fs::Filesystem::unmount()
 
         self.mounted = false;
         Ok(())
     }
 
     /// 格式化文件系统
+    ///
+    /// # 实现说明
+    /// 当前使用简化实现，只写入基本的魔数。
+    /// 完整实现应使用 littlefs2 crate:
+    /// ```ignore
+    /// use littlefs2::fs::Filesystem;
+    /// Filesystem::format(storage)?;
+    /// ```
     pub fn format(&mut self) -> Result<(), FsError> {
         // 如果已挂载，先卸载
         if self.mounted {
@@ -481,15 +498,13 @@ impl FileSystem {
         // 初始化存储
         self.storage.inner_mut().init()?;
 
-        // TODO: 调用 littlefs2 的 format 函数
-        // lfs_format(&mut self.lfs, &self.config)
-
         // 简化实现: 擦除前几个块并写入超级块
+        // 完整实现应使用 littlefs2::fs::Filesystem::format()
         for block in 0..core::cmp::min(4, self.config.block_count) {
             self.storage.erase(block)?;
         }
 
-        // 写入简化的超级块 (实际需要完整的 littlefs 格式)
+        // 写入简化的超级块 (包含 littlefs 魔数)
         let mut superblock = [0xFFu8; 4096];
         superblock[8..16].copy_from_slice(b"littlefs");
         superblock[0..4].copy_from_slice(&0x00000002u32.to_le_bytes()); // version
@@ -512,13 +527,15 @@ impl FileSystem {
     }
 
     /// 获取已用空间 (块数)
+    ///
+    /// # 实现说明
+    /// 当前返回 0，完整实现应使用 littlefs2 的 fs_size() 方法。
     pub fn used_blocks(&self) -> Result<u32, FsError> {
         if !self.mounted {
             return Err(FsError::NotMounted);
         }
 
-        // TODO: 从 littlefs 获取实际使用量
-        // lfs_fs_size(&self.lfs)
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::size()
         
         Ok(0) // 占位
     }
@@ -537,16 +554,16 @@ impl FileSystem {
     // ==================== 文件操作 ====================
 
     /// 打开文件
+    ///
+    /// # 实现说明
+    /// 当前为占位实现，返回模拟的 File 结构。
+    /// 完整实现应使用 littlefs2 crate 的 file_open 方法。
     pub fn open(&self, path: &str, options: OpenOptions) -> Result<File<'_>, FsError> {
         if !self.mounted {
             return Err(FsError::NotMounted);
         }
 
-        // TODO: 调用 littlefs2 的 file_open 函数
-        // let flags = options_to_lfs_flags(&options);
-        // lfs_file_open(&self.lfs, path, flags)
-
-        // 简化实现
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::open()
         let id = self.allocate_file_id();
         let size = if options.truncate { 0 } else { self.get_file_size(path)? };
 
@@ -565,42 +582,44 @@ impl FileSystem {
     }
 
     /// 删除文件
+    ///
+    /// # 实现说明
+    /// 当前为占位实现。完整实现应使用 littlefs2 的 remove 方法。
     pub fn remove(&self, path: &str) -> Result<(), FsError> {
         if !self.mounted {
             return Err(FsError::NotMounted);
         }
 
-        // TODO: 调用 littlefs2 的 remove 函数
-        // lfs_remove(&self.lfs, path)
-
-        let _ = path; // 占位
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::remove()
+        let _ = path;
         Ok(())
     }
 
     /// 重命名文件/目录
+    ///
+    /// # 实现说明
+    /// 当前为占位实现。完整实现应使用 littlefs2 的 rename 方法。
     pub fn rename(&self, old_path: &str, new_path: &str) -> Result<(), FsError> {
         if !self.mounted {
             return Err(FsError::NotMounted);
         }
 
-        // TODO: 调用 littlefs2 的 rename 函数
-        // lfs_rename(&self.lfs, old_path, new_path)
-
-        let _ = (old_path, new_path); // 占位
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::rename()
+        let _ = (old_path, new_path);
         Ok(())
     }
 
     /// 获取文件元数据
+    ///
+    /// # 实现说明
+    /// 当前返回默认值。完整实现应使用 littlefs2 的 stat 方法。
     pub fn metadata(&self, path: &str) -> Result<Metadata, FsError> {
         if !self.mounted {
             return Err(FsError::NotMounted);
         }
 
-        // TODO: 调用 littlefs2 的 stat 函数
-        // let mut info = lfs_info::default();
-        // lfs_stat(&self.lfs, path, &mut info)
-
-        let _ = path; // 占位
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::metadata()
+        let _ = path;
         
         Ok(Metadata {
             file_type: FileType::File,
@@ -621,15 +640,16 @@ impl FileSystem {
     // ==================== 目录操作 ====================
 
     /// 创建目录
+    ///
+    /// # 实现说明
+    /// 当前为占位实现。完整实现应使用 littlefs2 的 mkdir 方法。
     pub fn create_dir(&self, path: &str) -> Result<(), FsError> {
         if !self.mounted {
             return Err(FsError::NotMounted);
         }
 
-        // TODO: 调用 littlefs2 的 mkdir 函数
-        // lfs_mkdir(&self.lfs, path)
-
-        let _ = path; // 占位
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::create_dir()
+        let _ = path;
         Ok(())
     }
 
@@ -662,15 +682,16 @@ impl FileSystem {
     }
 
     /// 打开目录进行遍历
+    ///
+    /// # 实现说明
+    /// 当前为占位实现。完整实现应使用 littlefs2 的 dir_open 方法。
     pub fn read_dir(&self, path: &str) -> Result<Dir<'_>, FsError> {
         if !self.mounted {
             return Err(FsError::NotMounted);
         }
 
-        // TODO: 调用 littlefs2 的 dir_open 函数
-        // lfs_dir_open(&self.lfs, path)
-
-        let _ = path; // 占位
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::read_dir()
+        let _ = path;
         let id = self.allocate_dir_id();
 
         Ok(Dir {
@@ -694,33 +715,33 @@ impl FileSystem {
     }
 
     fn get_file_size(&self, _path: &str) -> Result<u32, FsError> {
-        // TODO: 从 littlefs 获取文件大小
+        // 占位实现 - 完整实现应使用 littlefs2::fs::Filesystem::metadata()
         Ok(0)
     }
 
     fn read_file_internal(&self, _id: u32, _offset: u32, buffer: &mut [u8]) -> Result<usize, FsError> {
-        // TODO: 调用 littlefs2 的 file_read 函数
+        // 占位实现 - 完整实现应使用 littlefs2 文件读取 API
         Ok(buffer.len())
     }
 
     fn write_file_internal(&self, _id: u32, _offset: u32, data: &[u8]) -> Result<usize, FsError> {
-        // TODO: 调用 littlefs2 的 file_write 函数
+        // 占位实现 - 完整实现应使用 littlefs2 文件写入 API
         Ok(data.len())
     }
 
     fn sync_file_internal(&self, _id: u32) -> Result<(), FsError> {
-        // TODO: 调用 littlefs2 的 file_sync 函数
-        self.storage.inner().config(); // 占位访问
+        // 占位实现 - 完整实现应使用 littlefs2 文件同步 API
+        self.storage.inner().config(); // 保持对 storage 的引用
         Ok(())
     }
 
     fn truncate_file_internal(&self, _id: u32, _size: u32) -> Result<(), FsError> {
-        // TODO: 调用 littlefs2 的 file_truncate 函数
+        // 占位实现 - 完整实现应使用 littlefs2 文件截断 API
         Ok(())
     }
 
     fn read_dir_internal(&self, _id: u32, _index: u32) -> Result<Option<Metadata>, FsError> {
-        // TODO: 调用 littlefs2 的 dir_read 函数
+        // 占位实现 - 完整实现应使用 littlefs2 目录读取 API
         Ok(None)
     }
 }

@@ -9,7 +9,7 @@ authors = ["RustRTOS Team"]
 [dependencies]
 # ===== ESP-HAL 1.0 核心 =====
 esp-hal = { version = "1.0", features = ["esp32s3", "unstable", "psram"] }
-esp-rtos = { version = "0.2", features = ["esp32s3", "embassy"] }
+esp-rtos = { version = "0.2", features = ["esp32s3", "embassy", "esp-alloc"] }
 esp-alloc = "0.9"
 esp-backtrace = { version = "0.18", features = ["esp32s3", "panic-handler", "println"], optional = true }
 esp-println = { version = "0.16", features = ["esp32s3", "auto"], optional = true }
@@ -42,6 +42,42 @@ embedded-hal-async = "1.0"
 littlefs2 = "0.4"
 embedded-storage = "0.3"
 
+# ===== 网络协议栈 (可选) =====
+# WiFi/BLE 驱动 (esp-wifi 已更名为 esp-radio)
+esp-radio = { version = "0.17", default-features = false, optional = true, features = [
+    "esp32s3",
+    "unstable",  # 必需：启用 wifi/ble/coex 等功能
+] }
+
+# TCP/IP 网络抽象层 (基于 smoltcp)
+embassy-net = { version = "0.7", default-features = false, optional = true, features = [
+    "tcp",
+    "udp",
+    "dns",
+    "dhcpv4",
+    "proto-ipv4",
+    "medium-ethernet",
+] }
+
+# BLE 协议栈 - trouble-host
+trouble-host = { version = "0.5", default-features = false, optional = true, features = [
+    "peripheral",
+    "gatt",
+    "default-packet-pool",
+    "derive",
+] }
+bt-hci = { version = "0.2", optional = true }
+
+# smoltcp 底层 (embassy-net 已包含，这里用于直接访问)
+smoltcp = { version = "0.12", default-features = false, optional = true, features = [
+    "proto-ipv4",
+    "socket-tcp",
+    "socket-udp",
+    "socket-dns",
+    "socket-dhcpv4",
+    "medium-ethernet",
+] }
+
 [features]
 default = []
 
@@ -56,6 +92,50 @@ log-defmt = ["defmt", "defmt-rtt", "esp-hal/defmt"]
 
 # 仅 esp-println 日志
 log-println = ["esp-println", "esp-backtrace"]
+
+# ===== 网络功能 Features =====
+# WiFi 支持 (STA/AP 模式)
+wifi = [
+    "esp-radio",
+    "esp-radio/wifi",
+    "esp-rtos/esp-radio",  # 启用 RTOS 适配器 (esp_rtos_semaphore_* 等)
+    "smoltcp",
+]
+
+# BLE 支持 - 使用 trouble-host (默认, 纯 Rust 实现)
+ble = [
+    "esp-radio",
+    "esp-radio/ble",
+    "esp-rtos/esp-radio",  # 启用 RTOS 适配器
+    "trouble-host",
+    "bt-hci",
+]
+
+# BLE 支持 - 仅使用 esp-radio 内置 BLE
+ble-esp = [
+    "esp-radio",
+    "esp-radio/ble",
+    "esp-rtos/esp-radio",  # 启用 RTOS 适配器
+]
+
+# WiFi + BLE 共存模式
+coex = [
+    "wifi",
+    "ble",
+    "esp-radio/coex",
+]
+
+# TCP/IP 网络栈 (需要 WiFi)
+network = [
+    "wifi",
+    "embassy-net",
+]
+
+# 完整网络功能 (WiFi + BLE + TCP/IP)
+full-network = [
+    "network",
+    "ble",
+]
 
 # =============================================
 # Profile 配置 - 最激进性能优化
@@ -154,3 +234,32 @@ path = "examples/filesystem.rs"
 [[example]]
 name = "benchmark_memory"
 path = "examples/benchmark_memory.rs"
+[[example]]
+name = "wifi_scan"
+path = "examples/wifi_scan.rs"
+required-features = ["wifi", "dev"]
+
+[[example]]
+name = "wifi_connect"
+path = "examples/wifi_connect.rs"
+required-features = ["network", "dev"]
+
+[[example]]
+name = "tcp_client"
+path = "examples/tcp_client.rs"
+required-features = ["network", "dev"]
+
+[[example]]
+name = "ble_advertise"
+path = "examples/ble_advertise.rs"
+required-features = ["ble", "dev"]
+
+[[example]]
+name = "ble_gatt_server"
+path = "examples/ble_gatt_server.rs"
+required-features = ["ble", "dev"]
+
+[[example]]
+name = "benchmark_network"
+path = "examples/benchmark_network.rs"
+required-features = ["network", "dev"]
