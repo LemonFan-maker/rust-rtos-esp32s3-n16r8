@@ -1,28 +1,19 @@
-//! WiFi 模块
-//!
-//! 提供 ESP32-S3 的 WiFi STA 和 AP 模式支持。
-//!
-//! # 功能
-//!
-//! - WiFi 网络扫描
-//! - STA 模式连接到 AP
-//! - AP 模式创建热点
+//! WiFi模块
+//! 提供ESP32-S3的WiFi STA和AP模式支持。
+//! 功能
+//! - WiFi网络扫描
+//! - STA模式连接到AP
+//! - AP模式创建热点
 //! - 连接状态监控
 //! - 自动重连
-//!
-//! # 示例
-//!
-//! ```ignore
+//! 示例
 //! use rustrtos::net::wifi::{WifiController, WifiMode};
-//!
 //! let mut controller = WifiController::new(wifi, radio_clk, rng).await?;
 //! controller.set_mode(WifiMode::Sta).await?;
 //! controller.connect("MySSID", "password").await?;
-//!
-//! // 等待获取 IP 地址
+//! // 等待获取IP地址
 //! let ip = controller.wait_for_ip().await?;
 //! println!("Got IP: {:?}", ip);
-//! ```
 
 use core::fmt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -33,16 +24,16 @@ use heapless::{String, Vec};
 
 use super::config::*;
 
-// ===== 错误类型 =====
+// 错误类型
 
-/// WiFi 错误类型
+/// WiFi错误类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WifiError {
     /// 未初始化
     NotInitialized,
     /// 连接失败
     ConnectionFailed,
-    /// 认证失败 (密码错误)
+    /// 认证失败(密码错误)
     AuthenticationFailed,
     /// 找不到网络
     NetworkNotFound,
@@ -80,37 +71,37 @@ impl fmt::Display for WifiError {
     }
 }
 
-// ===== WiFi 模式 =====
+// WiFi模式
 
-/// WiFi 工作模式
+/// WiFi工作模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WifiMode {
     /// 未配置
     #[default]
     None,
-    /// Station 模式 (客户端)
+    /// Station模式(客户端)
     Sta,
-    /// Access Point 模式 (热点)
+    /// Access Point模式(热点)
     Ap,
-    /// 同时支持 STA 和 AP
+    /// 同时支持STA和AP
     ApSta,
 }
 
-// ===== WiFi 事件 =====
+// WiFi事件
 
-/// WiFi 事件类型
+/// WiFi事件类型
 #[derive(Debug, Clone)]
 pub enum WifiEvent {
-    /// 已连接到 AP
+    /// 已连接到AP
     StaConnected,
-    /// 已从 AP 断开
+    /// 已从AP断开
     StaDisconnected {
         /// 断开原因
         reason: DisconnectReason,
     },
-    /// 获取到 IP 地址
+    /// 获取到IP地址
     GotIp {
-        /// IP 地址
+        /// IP地址
         ip: [u8; 4],
         /// 网关
         gateway: [u8; 4],
@@ -122,14 +113,14 @@ pub enum WifiEvent {
         /// 找到的网络数量
         count: usize,
     },
-    /// AP 模式: 客户端连接
+    /// AP模式: 客户端连接
     ApStaConnected {
-        /// 客户端 MAC 地址
+        /// 客户端MAC地址
         mac: [u8; 6],
     },
-    /// AP 模式: 客户端断开
+    /// AP模式: 客户端断开
     ApStaDisconnected {
-        /// 客户端 MAC 地址
+        /// 客户端MAC地址
         mac: [u8; 6],
     },
 }
@@ -159,13 +150,13 @@ pub enum DisconnectReason {
     BadChannel,
     /// 信号弱
     BeaconTimeout,
-    /// AP 未找到
+    /// AP未找到
     NoApFound,
     /// 密码错误
     WrongPassword,
     /// 连接失败
     ConnectionFail,
-    /// AP 握手超时
+    /// AP握手超时
     ApHandshakeFail,
 }
 
@@ -175,16 +166,16 @@ impl Default for DisconnectReason {
     }
 }
 
-// ===== 扫描结果 =====
+// 扫描结果
 
-/// WiFi 扫描结果
+/// WiFi扫描结果
 #[derive(Debug, Clone)]
 pub struct ScanResult {
     /// SSID
     pub ssid: String<32>,
-    /// BSSID (MAC 地址)
+    /// BSSID (MAC地址)
     pub bssid: [u8; 6],
-    /// 信号强度 (dBm)
+    /// 信号强度(dBm)
     pub rssi: i8,
     /// 信道
     pub channel: u8,
@@ -192,7 +183,7 @@ pub struct ScanResult {
     pub auth_mode: AuthMode,
 }
 
-/// WiFi 安全模式
+/// WiFi安全模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuthMode {
     /// 开放网络
@@ -214,9 +205,9 @@ pub enum AuthMode {
     Enterprise,
 }
 
-// ===== WiFi 状态 =====
+// WiFi状态
 
-/// WiFi 连接状态
+/// WiFi连接状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WifiState {
     /// 未初始化
@@ -230,29 +221,28 @@ pub enum WifiState {
     Connecting,
     /// 已连接
     Connected,
-    /// 正在获取 IP
+    /// 正在获取IP
     GettingIp,
-    /// 已获取 IP
+    /// 已获取IP
     Ready,
     /// 已断开
     Disconnected,
 }
 
-// ===== WiFi 控制器 =====
+// WiFi控制器
 
-/// WiFi 控制器
-///
-/// 管理 WiFi 连接生命周期，提供异步 API。
+/// WiFi控制器
+/// 管理WiFi连接生命周期，提供异步API。
 pub struct WifiController<'a> {
     /// 当前模式
     mode: WifiMode,
     /// 当前状态
     state: WifiState,
-    /// 当前 SSID
+    /// 当前SSID
     ssid: String<32>,
     /// 当前密码
     password: String<64>,
-    /// IP 地址
+    /// IP地址
     ip_address: Option<[u8; 4]>,
     /// 网关地址
     gateway: Option<[u8; 4]>,
@@ -269,10 +259,8 @@ pub struct WifiController<'a> {
 }
 
 impl<'a> WifiController<'a> {
-    /// 创建新的 WiFi 控制器
-    ///
-    /// # 注意
-    ///
+    /// 创建新的WiFi控制器
+    /// 注意
     /// 此函数需要在系统初始化时调用，传入所需的外设和静态分配的通道。
     pub fn new(
         event_channel: &'a Channel<CriticalSectionRawMutex, WifiEvent, WIFI_EVENT_QUEUE_SIZE>,
@@ -293,32 +281,28 @@ impl<'a> WifiController<'a> {
         }
     }
 
-    /// 初始化 WiFi 硬件
-    ///
-    /// 注意：在调用此函数之前，必须先初始化 esp-radio:
-    /// ```ignore
+    /// 初始化WiFi硬件
+    /// 注意：在调用此函数之前，必须先初始化esp-radio:
     /// let timg0 = TimerGroup::new(peripherals.TIMG0);
     /// esp_rtos::start(timg0.timer0);
     /// let _controller = esp_radio::init().unwrap();
-    /// ```
     pub async fn init(&mut self) -> Result<(), WifiError> {
-        // esp-radio 的初始化在更高层完成
+        // esp-radio的初始化在更高层完成
         // 这里只是设置本地状态
         self.state = WifiState::Idle;
         Ok(())
     }
 
-    /// 设置 WiFi 模式
-    ///
-    /// **注意**: 这只更新内部状态。实际的 WiFi 模式配置应通过 esp-radio 的
-    /// `WifiController::set_config()` 完成。参见 `examples/wifi_connect.rs`。
+    /// 设置WiFi模式
+    /// 注意: 这只更新内部状态。实际的WiFi模式配置应通过esp-radio的
+    /// WifiController::set_config()完成。参见examples/wifi_connect.rs。
     pub async fn set_mode(&mut self, mode: WifiMode) -> Result<(), WifiError> {
         if self.state == WifiState::Uninitialized {
             return Err(WifiError::NotInitialized);
         }
 
         self.mode = mode;
-        // 状态管理层 - 实际模式设置通过 esp_radio::wifi::WifiController 完成
+        // 状态管理层 - 实际模式设置通过esp_radio::wifi::WifiController完成
         Ok(())
     }
 
@@ -332,10 +316,9 @@ impl<'a> WifiController<'a> {
         self.state
     }
 
-    /// 扫描周围的 WiFi 网络
-    ///
-    /// **注意**: 此函数仅管理状态。实际扫描操作应通过 esp-radio API 完成。
-    /// 请参考 `examples/wifi_scan.rs`。
+    /// 扫描周围的WiFi网络
+    /// 注意: 此函数仅管理状态。实际扫描操作应通过esp-radio API完成。
+    /// 请参考examples/wifi_scan.rs。
     pub async fn scan(&mut self) -> Result<&[ScanResult], WifiError> {
         if self.state == WifiState::Uninitialized {
             return Err(WifiError::NotInitialized);
@@ -344,12 +327,12 @@ impl<'a> WifiController<'a> {
         self.state = WifiState::Scanning;
         self.scan_results.clear();
 
-        // 状态管理层 - 实际扫描通过 esp_radio::wifi::WifiController 完成
+        // 状态管理层 - 实际扫描通过esp_radio::wifi::WifiController完成
         // 等待外部扫描完成的延迟
         Timer::after(Duration::from_millis(100)).await;
 
         self.state = WifiState::Idle;
-        
+
         // 发送扫描完成事件
         let _ = self.event_channel.try_send(WifiEvent::ScanDone {
             count: self.scan_results.len(),
@@ -358,12 +341,10 @@ impl<'a> WifiController<'a> {
         Ok(&self.scan_results)
     }
 
-    /// 连接到指定的 WiFi 网络
-    ///
-    /// # 参数
-    ///
-    /// - `ssid` - 网络名称
-    /// - `password` - 密码 (开放网络传空字符串)
+    /// 连接到指定的WiFi网络
+    /// 参数
+    /// - ssid - 网络名称
+    /// - password - 密码(开放网络传空字符串)
     pub async fn connect(&mut self, ssid: &str, password: &str) -> Result<(), WifiError> {
         if self.state == WifiState::Uninitialized {
             return Err(WifiError::NotInitialized);
@@ -378,10 +359,10 @@ impl<'a> WifiController<'a> {
         self.state = WifiState::Connecting;
         self.reconnect_count = 0;
 
-        // 状态管理层 - 实际连接通过 esp_radio::wifi::WifiController::connect_async() 完成
+        // 状态管理层 - 实际连接通过esp_radio::wifi::WifiController::connect_async()完成
         // 这里等待外部控制器触发的连接信号
         let timeout = Duration::from_millis(WIFI_CONNECT_TIMEOUT_MS as u64);
-        
+
         match embassy_time::with_timeout(timeout, self.wait_connected()).await {
             Ok(result) => result,
             Err(_) => {
@@ -397,10 +378,10 @@ impl<'a> WifiController<'a> {
         loop {
             if self.connected_signal.wait().await {
                 self.state = WifiState::Connected;
-                
+
                 // 发送连接事件
                 let _ = self.event_channel.try_send(WifiEvent::StaConnected);
-                
+
                 return Ok(());
             } else {
                 return Err(WifiError::ConnectionFailed);
@@ -408,16 +389,15 @@ impl<'a> WifiController<'a> {
         }
     }
 
-    /// 断开 WiFi 连接
-    ///
-    /// **注意**: 此函数仅更新内部状态。实际断开操作应通过
-    /// `esp_radio::wifi::WifiController::disconnect_async()` 完成。
+    /// 断开WiFi连接
+    /// 注意: 此函数仅更新内部状态。实际断开操作应通过
+    /// esp_radio::wifi::WifiController::disconnect_async()完成。
     pub async fn disconnect(&mut self) -> Result<(), WifiError> {
         if self.state == WifiState::Uninitialized {
             return Err(WifiError::NotInitialized);
         }
 
-        // 状态管理层 - 实际断开通过 esp_radio::wifi::WifiController 完成
+        // 状态管理层 - 实际断开通过esp_radio::wifi::WifiController完成
         self.state = WifiState::Disconnected;
         self.ip_address = None;
         self.gateway = None;
@@ -429,10 +409,9 @@ impl<'a> WifiController<'a> {
         Ok(())
     }
 
-    /// 等待获取 IP 地址
-    ///
-    /// **注意**: IP 地址获取应通过 embassy-net 的 DHCP 客户端完成。
-    /// 此函数仅等待 `set_ip_address()` 被调用。参见 `examples/tcp_client.rs`。
+    /// 等待获取IP地址
+    /// 注意: IP地址获取应通过embassy-net的DHCP客户端完成。
+    /// 此函数仅等待set_ip_address()被调用。参见examples/tcp_client.rs。
     pub async fn wait_for_ip(&mut self) -> Result<[u8; 4], WifiError> {
         if self.state != WifiState::Connected && self.state != WifiState::GettingIp {
             return Err(WifiError::NotInitialized);
@@ -440,10 +419,10 @@ impl<'a> WifiController<'a> {
 
         self.state = WifiState::GettingIp;
 
-        // 等待外部设置 IP 地址 (通过 set_ip_address 方法)
-        // DHCP 客户端应通过 embassy-net::DhcpConfig 配置
+        // 等待外部设置IP地址(通过set_ip_address方法)
+        // DHCP客户端应通过embassy-net::DhcpConfig配置
         let timeout = Duration::from_secs(DHCP_TIMEOUT_SECS as u64);
-        
+
         match embassy_time::with_timeout(timeout, self.wait_ip_internal()).await {
             Ok(ip) => {
                 self.state = WifiState::Ready;
@@ -453,10 +432,10 @@ impl<'a> WifiController<'a> {
         }
     }
 
-    /// 内部等待 IP
+    /// 内部等待IP
     async fn wait_ip_internal(&self) -> [u8; 4] {
-        // 轮询等待 IP 地址被设置
-        // 应用层应通过 set_ip_address() 设置
+        // 轮询等待IP地址被设置
+        // 应用层应通过set_ip_address()设置
         loop {
             if let Some(ip) = self.ip_address {
                 return ip;
@@ -465,7 +444,7 @@ impl<'a> WifiController<'a> {
         }
     }
 
-    /// 获取当前 IP 地址
+    /// 获取当前IP地址
     pub fn ip_address(&self) -> Option<[u8; 4]> {
         self.ip_address
     }
@@ -475,14 +454,13 @@ impl<'a> WifiController<'a> {
         self.gateway
     }
 
-    /// 设置 IP 地址 (由外部 DHCP 客户端调用)
-    ///
-    /// 当使用 embassy-net 获取到 IP 地址后，调用此方法更新状态。
+    /// 设置IP地址(由外部DHCP客户端调用)
+    /// 当使用embassy-net获取到IP地址后，调用此方法更新状态。
     pub fn set_ip_address(&mut self, ip: [u8; 4], gateway: [u8; 4]) {
         self.ip_address = Some(ip);
         self.gateway = Some(gateway);
         self.state = WifiState::Ready;
-        
+
         let _ = self.event_channel.try_send(WifiEvent::GotIp {
             ip,
             gateway,
@@ -490,7 +468,7 @@ impl<'a> WifiController<'a> {
         });
     }
 
-    /// 设置连接状态 (由外部控制器回调调用)
+    /// 设置连接状态(由外部控制器回调调用)
     pub fn set_connected(&mut self, connected: bool) {
         if connected {
             self.state = WifiState::Connected;
@@ -518,31 +496,31 @@ impl<'a> WifiController<'a> {
         &self.scan_results
     }
 
-    /// 接收 WiFi 事件
+    /// 接收WiFi事件
     pub async fn recv_event(&self) -> WifiEvent {
         self.event_channel.receive().await
     }
 
-    /// 尝试接收 WiFi 事件 (非阻塞)
+    /// 尝试接收WiFi事件(非阻塞)
     pub fn try_recv_event(&self) -> Option<WifiEvent> {
         self.event_channel.try_receive().ok()
     }
 }
 
-// ===== AP 模式配置 =====
+// AP模式配置
 
-/// AP 模式配置
+/// AP模式配置
 #[derive(Debug, Clone)]
 pub struct ApConfig {
     /// SSID
     pub ssid: String<32>,
-    /// 密码 (空字符串表示开放网络)
+    /// 密码(空字符串表示开放网络)
     pub password: String<64>,
-    /// 信道 (1-13)
+    /// 信道(1-13)
     pub channel: u8,
     /// 最大客户端数量
     pub max_clients: u8,
-    /// 隐藏 SSID
+    /// 隐藏SSID
     pub hidden: bool,
 }
 
@@ -558,9 +536,9 @@ impl Default for ApConfig {
     }
 }
 
-// ===== WiFi 统计信息 =====
+// WiFi统计信息
 
-/// WiFi 统计信息
+/// WiFi统计信息
 #[derive(Debug, Clone, Default)]
 pub struct WifiStats {
     /// 发送的数据包数量
@@ -575,8 +553,8 @@ pub struct WifiStats {
     pub tx_errors: u32,
     /// 接收错误数
     pub rx_errors: u32,
-    /// 当前 RSSI (dBm)
+    /// 当前RSSI (dBm)
     pub rssi: i8,
-    /// 连接时长 (秒)
+    /// 连接时长(秒)
     pub connected_time: u32,
 }

@@ -1,15 +1,10 @@
-//! BLE GATT Server 示例 - 使用真实 trouble-host API
-//!
-//! 演示如何创建一个 BLE GATT 服务端，提供 Battery Service。
-//!
-//! # 功能
+//! BLE GATT Server示例 - 使用真实trouble-host API
+//! 演示如何创建一个BLE GATT服务端，提供Battery Service。
+//! 功能
 //! - Battery Service (0x180F)
-//! - 电池电量特征值 (只读 + 通知)
-//!
-//! # 运行
-//! ```bash
+//! - 电池电量特征值(只读 + 通知)
+//! 运行
 //! cargo run --example ble_gatt_server --features ble,dev --release
-//! ```
 
 #![no_std]
 #![no_main]
@@ -31,20 +26,20 @@ use esp_hal::timer::timg::TimerGroup;
 use portable_atomic::{AtomicU8, Ordering};
 use static_cell::StaticCell;
 
-// esp-radio BLE 控制器
+// esp-radio BLE控制器
 use esp_radio::ble::controller::BleConnector;
 
-// trouble-host BLE 协议栈
+// trouble-host BLE协议栈
 use trouble_host::prelude::*;
 
-// ===== 配置 =====
+// 配置
 const DEVICE_NAME: &str = "RustRTOS-GATT";
 
-// ===== 堆初始化 =====
+// 堆初始化
 fn init_heap() {
     const HEAP_SIZE: usize = 72 * 1024;
     static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
-    
+
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
             HEAP.as_mut_ptr() as *mut u8,
@@ -54,7 +49,7 @@ fn init_heap() {
     }
 }
 
-// ===== 条件编译日志 =====
+// 条件编译日志
 #[cfg(feature = "dev")]
 use esp_println::println;
 
@@ -63,7 +58,7 @@ macro_rules! println {
     ($($arg:tt)*) => {};
 }
 
-// ===== Panic Handler =====
+// Panic Handler
 #[cfg(feature = "dev")]
 use esp_backtrace as _;
 
@@ -73,14 +68,14 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-// Host 资源配置
+// Host资源配置
 const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 2;
 
-// 共享 LED 状态
+// 共享LED状态
 static LED_STATE: AtomicU8 = AtomicU8::new(0);
 
-// GATT Server 定义
+// GATT Server定义
 #[gatt_server]
 struct Server {
     battery_service: BatteryService,
@@ -94,7 +89,7 @@ struct BatteryService {
     level: u8,
 }
 
-/// 运行 BLE 协议栈任务
+/// 运行BLE协议栈任务
 async fn ble_task<C: Controller, P: PacketPool>(mut runner: Runner<'_, C, P>) {
     loop {
         if let Err(e) = runner.run().await {
@@ -103,13 +98,13 @@ async fn ble_task<C: Controller, P: PacketPool>(mut runner: Runner<'_, C, P>) {
     }
 }
 
-/// 处理 GATT 事件
+/// 处理GATT事件
 async fn gatt_events_task<P: PacketPool>(
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, P>,
 ) -> Result<(), Error> {
     let level = server.battery_service.level;
-    
+
     loop {
         match conn.next().await {
             GattConnectionEvent::Disconnected { reason } => {
@@ -125,7 +120,7 @@ async fn gatt_events_task<P: PacketPool>(
                         }
                     }
                     GattEvent::Write(ev) => {
-                        println!("[GATT] Write event: handle={}, data={:?}", 
+                        println!("[GATT] Write event: handle={}, data={:?}",
                             ev.handle(), ev.data());
                     }
                     _ => {}
@@ -149,15 +144,15 @@ async fn notification_task<P: PacketPool>(
 ) {
     let level = server.battery_service.level;
     let mut battery: u8 = 100;
-    
+
     loop {
         Timer::after(embassy_time::Duration::from_secs(2)).await;
-        
+
         // 模拟电池放电
         battery = if battery > 0 { battery - 1 } else { 100 };
-        
+
         println!("[GATT] Notifying battery level: {}%", battery);
-        
+
         if level.notify(conn, &battery).await.is_err() {
             println!("[GATT] Notify error, connection may be closed");
             break;
@@ -179,7 +174,7 @@ async fn advertise<'values, 'server, C: Controller>(
         ],
         &mut adv_data[..],
     )?;
-    
+
     let advertiser = peripheral
         .advertise(
             &Default::default(),
@@ -189,48 +184,46 @@ async fn advertise<'values, 'server, C: Controller>(
             },
         )
         .await?;
-    
+
     println!("[BLE] Advertising started");
     let conn = advertiser.accept().await?.with_attribute_server(server)?;
     println!("[BLE] Connection established!");
     Ok(conn)
 }
 
-/// 主 BLE GATT 任务
+/// 主BLE GATT任务
 async fn ble_gatt_server<C: Controller>(controller: C) {
     // 使用随机地址
     let address: Address = Address::random([0x41, 0x5A, 0xE3, 0x1E, 0x83, 0xE7]);
-    println!("BLE Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", 
+    println!("BLE Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
         0x41, 0x5A, 0xE3, 0x1E, 0x83, 0xE7);
 
-    // 创建 Host 资源
-    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> = 
+    // 创建Host资源
+    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    
-    // 构建 BLE 协议栈
+
+    // 构建BLE协议栈
     let stack = trouble_host::new(controller, &mut resources)
         .set_random_address(address);
-    
+
     let Host {
         mut peripheral,
         runner,
         ..
     } = stack.build();
 
-    // 创建 GATT 服务器
+    // 创建GATT服务器
     let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
         name: DEVICE_NAME,
         appearance: &appearance::power_device::GENERIC_POWER_DEVICE,
     }))
     .unwrap();
 
-    println!("\n=========================================");
-    println!("   BLE GATT Server Active");
-    println!("   Device: {}", DEVICE_NAME);
-    println!("   Services: Battery Service (0x180F)");
-    println!("=========================================\n");
+    println!("BLE GATT Server Active");
+    println!("Device: {}", DEVICE_NAME);
+    println!("Services: Battery Service (0x180F)");
 
-    // 运行 BLE 协议栈和 GATT 服务
+    // 运行BLE协议栈和GATT服务
     let _ = join(
         ble_task(runner),
         async {
@@ -240,7 +233,7 @@ async fn ble_gatt_server<C: Controller>(controller: C) {
                         // 连接后运行任务
                         let events = gatt_events_task(&server, &conn);
                         let notify = notification_task(&server, &conn);
-                        
+
                         // 任意一个任务结束则返回广播
                         select(events, notify).await;
                         println!("[BLE] Connection ended, restarting advertising...");
@@ -255,16 +248,16 @@ async fn ble_gatt_server<C: Controller>(controller: C) {
     ).await;
 }
 
-/// LED 控制任务
+/// LED控制任务
 #[embassy_executor::task]
 async fn led_task(mut led: Output<'static>) {
     println!("LED task started");
-    
+
     let mut last_state = 0u8;
-    
+
     loop {
         let current_state = LED_STATE.load(Ordering::Relaxed);
-        
+
         if current_state != last_state {
             if current_state == 1 {
                 led.set_high();
@@ -275,7 +268,7 @@ async fn led_task(mut led: Output<'static>) {
             }
             last_state = current_state;
         }
-        
+
         Timer::after(embassy_time::Duration::from_millis(50)).await;
     }
 }
@@ -283,23 +276,21 @@ async fn led_task(mut led: Output<'static>) {
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
     init_heap();
-    
+
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    
-    println!("=========================================");
-    println!("   RustRTOS BLE GATT Server Example");
-    println!("   ESP32-S3 @ 240MHz");
-    println!("=========================================");
+
+    println!("RustRTOS BLE GATT Server Example");
+    println!("ESP32-S3 @ 240MHz");
 
     // 初始化时钟
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    // 初始化 LED
+    // 初始化LED
     let led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
     spawner.spawn(led_task(led)).ok();
 
-    // 初始化 esp-radio 控制器
+    // 初始化esp-radio控制器
     let radio_controller = match esp_radio::init() {
         Ok(ctrl) => {
             println!("esp-radio initialized successfully");
@@ -310,17 +301,17 @@ async fn main(spawner: Spawner) {
             loop { core::hint::spin_loop(); }
         }
     };
-    
-    // 存储 radio_controller 到静态区
+
+    // 存储radio_controller到静态区
     static RADIO_CONTROLLER: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
     let radio_ref = RADIO_CONTROLLER.init(radio_controller);
-    
-    // 创建 BLE 控制器
+
+    // 创建BLE控制器
     let connector = BleConnector::new(radio_ref, peripherals.BT, Default::default()).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
-    
+
     println!("BLE controller initialized");
 
-    // 运行 BLE GATT 服务器
+    // 运行BLE GATT服务器
     ble_gatt_server(controller).await;
 }

@@ -2,12 +2,12 @@
 name = "rustrtos"
 version = "0.2.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "A high-performance RTOS for ESP32-S3 based on Embassy and esp-hal 1.0"
-authors = ["RustRTOS Team"]
+authors = ["LemonFan-maker"]
 
 [dependencies]
-# ===== ESP-HAL 1.0 核心 =====
+# ESP-HAL 1.0核心
 esp-hal = { version = "1.0", features = ["esp32s3", "unstable", "psram"] }
 esp-rtos = { version = "0.2", features = ["esp32s3", "embassy", "esp-alloc"] }
 esp-alloc = "0.9"
@@ -15,41 +15,41 @@ esp-backtrace = { version = "0.18", features = ["esp32s3", "panic-handler", "pri
 esp-println = { version = "0.16", features = ["esp32s3", "auto"], optional = true }
 esp-bootloader-esp-idf = { version = "0.4", features = ["esp32s3"] }
 
-# ===== Embassy 异步运行时 =====
-# 注意: esp-rtos 0.2 要求 embassy-executor 0.9
+# Embassy异步运行时
+# 注意: esp-rtos 0.2要求embassy-executor 0.9
 embassy-executor = { version = "0.9" }
 embassy-time = { version = "0.4" }
 embassy-sync = { version = "0.7" }
 embassy-futures = { version = "0.1" }
 
-# ===== 静态分配 =====
+# 静态分配
 static_cell = "2.1"
 heapless = "0.8"
 
-# ===== 同步原语 =====
+# 同步原语
 critical-section = "1.2"
 portable-atomic = { version = "1.11", default-features = false, features = ["critical-section"] }
 
-# ===== 可选: defmt 日志 =====
+# 可选: defmt日志
 defmt = { version = "1.0", features = [], optional = true }
 defmt-rtt = { version = "1.0", optional = true }
 
-# ===== 嵌入式基础 =====
+# 嵌入式基础
 embedded-hal = "1.0"
 embedded-hal-async = "1.0"
 
-# ===== 文件系统 =====
+# 文件系统
 littlefs2 = "0.4"
 embedded-storage = "0.3"
 
-# ===== 网络协议栈 (可选) =====
-# WiFi/BLE 驱动 (esp-wifi 已更名为 esp-radio)
+# 网络协议栈
+# WiFi/BLE驱动
 esp-radio = { version = "0.17", default-features = false, optional = true, features = [
     "esp32s3",
-    "unstable",  # 必需：启用 wifi/ble/coex 等功能
+    "unstable",  # 必需：启用wifi/ble/coex等功能
 ] }
 
-# TCP/IP 网络抽象层 (基于 smoltcp)
+# TCP/IP网络抽象层(基于smoltcp)
 embassy-net = { version = "0.7", default-features = false, optional = true, features = [
     "tcp",
     "udp",
@@ -59,7 +59,7 @@ embassy-net = { version = "0.7", default-features = false, optional = true, feat
     "medium-ethernet",
 ] }
 
-# BLE 协议栈 - trouble-host
+# BLE协议栈 - trouble-host
 trouble-host = { version = "0.5", default-features = false, optional = true, features = [
     "peripheral",
     "gatt",
@@ -68,7 +68,7 @@ trouble-host = { version = "0.5", default-features = false, optional = true, fea
 ] }
 bt-hci = { version = "0.2", optional = true }
 
-# smoltcp 底层 (embassy-net 已包含，这里用于直接访问)
+# smoltcp底层(embassy-net已包含，这里用于直接访问)
 smoltcp = { version = "0.12", default-features = false, optional = true, features = [
     "proto-ipv4",
     "socket-tcp",
@@ -81,65 +81,63 @@ smoltcp = { version = "0.12", default-features = false, optional = true, feature
 [features]
 default = []
 
-# 开发模式 - 启用 esp-println 日志和调试
+# 开发模式 - 启用esp-println日志和调试
 dev = [
     "esp-backtrace",
     "esp-println",
 ]
 
-# 仅 defmt 日志 (需要额外配置)
+# 仅defmt日志(需要额外配置)
 log-defmt = ["defmt", "defmt-rtt", "esp-hal/defmt"]
 
-# 仅 esp-println 日志
+# 仅esp-println日志
 log-println = ["esp-println", "esp-backtrace"]
 
-# ===== 网络功能 Features =====
-# WiFi 支持 (STA/AP 模式)
+# 网络功能Features
+# WiFi支持(STA/AP模式)
 wifi = [
     "esp-radio",
     "esp-radio/wifi",
-    "esp-rtos/esp-radio",  # 启用 RTOS 适配器 (esp_rtos_semaphore_* 等)
+    "esp-rtos/esp-radio",  # 启用RTOS适配器(esp_rtos_semaphore_* 等)
     "smoltcp",
 ]
 
-# BLE 支持 - 使用 trouble-host (默认, 纯 Rust 实现)
+# BLE支持 - 使用trouble-host (默认, 纯Rust实现)
 ble = [
     "esp-radio",
     "esp-radio/ble",
-    "esp-rtos/esp-radio",  # 启用 RTOS 适配器
+    "esp-rtos/esp-radio",  # 启用RTOS适配器
     "trouble-host",
     "bt-hci",
 ]
 
-# BLE 支持 - 仅使用 esp-radio 内置 BLE
+# BLE支持 - 仅使用esp-radio内置BLE
 ble-esp = [
     "esp-radio",
     "esp-radio/ble",
-    "esp-rtos/esp-radio",  # 启用 RTOS 适配器
+    "esp-rtos/esp-radio",  # 启用RTOS适配器
 ]
 
-# WiFi + BLE 共存模式
+# WiFi + BLE共存模式
 coex = [
     "wifi",
     "ble",
     "esp-radio/coex",
 ]
 
-# TCP/IP 网络栈 (需要 WiFi)
+# TCP/IP网络栈(需要WiFi)
 network = [
     "wifi",
     "embassy-net",
 ]
 
-# 完整网络功能 (WiFi + BLE + TCP/IP)
+# 完整网络功能(WiFi + BLE + TCP/IP)
 full-network = [
     "network",
     "ble",
 ]
 
-# =============================================
-# Profile 配置 - 最激进性能优化
-# =============================================
+# Profile配置 - 最激进性能优化
 
 [profile.dev]
 opt-level = 1
@@ -164,9 +162,7 @@ opt-level = 3
 [profile.dev.package.critical-section]
 opt-level = 3
 
-# =============================================
 # Release Profile - 最大性能
-# =============================================
 [profile.release]
 opt-level = 3
 lto = "fat"
@@ -179,21 +175,17 @@ strip = "symbols"
 incremental = false
 rpath = false
 
-# Build script 配置
+# Build script配置
 [package.metadata.espflash]
-# 这些选项在使用 espflash 时会自动应用
-# 不再需要 --ignore-app-descriptor 因为我们提供了正确的 App Descriptor
+# 这些选项在使用espflash时会自动应用
+# 不再需要 --ignore-app-descriptor因为我们提供了正确的App Descriptor
 
-# =============================================
 # Release-Size Profile - 最小体积
-# =============================================
 [profile.release-size]
 inherits = "release"
 opt-level = "z"
 
-# =============================================
 # Bench Profile - 性能测试
-# =============================================
 [profile.bench]
 inherits = "release"
 debug = true

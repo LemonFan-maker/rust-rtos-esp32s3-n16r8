@@ -1,11 +1,7 @@
-//! BLE 广播示例 - 使用真实 trouble-host API
-//!
-//! 演示如何使用 trouble-host 进行蓝牙低功耗广播。
-//!
-//! # 运行
-//! ```bash
+//! BLE广播示例 - 使用真实trouble-host API
+//! 演示如何使用trouble-host进行蓝牙低功耗广播。
+//! 运行
 //! cargo run --example ble_advertise --features ble,dev --release
-//! ```
 
 #![no_std]
 #![no_main]
@@ -24,20 +20,20 @@ use embassy_time::Timer;
 use esp_hal::timer::timg::TimerGroup;
 use static_cell::StaticCell;
 
-// esp-radio BLE 控制器
+// esp-radio BLE控制器
 use esp_radio::ble::controller::BleConnector;
 
-// trouble-host BLE 协议栈 - 使用 re-export 的 embassy_time
+// trouble-host BLE协议栈 - 使用re-export的embassy_time
 use trouble_host::prelude::*;
 
-// ===== 配置 =====
+// 配置
 const DEVICE_NAME: &[u8] = b"RustRTOS-BLE";
 
-// ===== 堆初始化 =====
+// 堆初始化
 fn init_heap() {
     const HEAP_SIZE: usize = 72 * 1024; // 72KB for BLE
     static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
-    
+
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
             HEAP.as_mut_ptr() as *mut u8,
@@ -47,7 +43,7 @@ fn init_heap() {
     }
 }
 
-// ===== 条件编译日志 =====
+// 条件编译日志
 #[cfg(feature = "dev")]
 use esp_println::println;
 
@@ -56,7 +52,7 @@ macro_rules! println {
     ($($arg:tt)*) => {};
 }
 
-// ===== Panic Handler =====
+// Panic Handler
 #[cfg(feature = "dev")]
 use esp_backtrace as _;
 
@@ -66,25 +62,25 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-// Host 资源配置
+// Host资源配置
 const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 2;
 
-/// BLE 广播任务
+/// BLE广播任务
 async fn ble_advertise<C: Controller>(controller: C) {
     // 使用随机地址
     let address: Address = Address::random([0x41, 0x5A, 0xE3, 0x1E, 0x83, 0xE7]);
-    println!("BLE Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", 
+    println!("BLE Address: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
         0x41, 0x5A, 0xE3, 0x1E, 0x83, 0xE7);
 
-    // 创建 Host 资源
-    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> = 
+    // 创建Host资源
+    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    
-    // 构建 BLE 协议栈
+
+    // 构建BLE协议栈
     let stack = trouble_host::new(controller, &mut resources)
         .set_random_address(address);
-    
+
     let Host {
         mut peripheral,
         mut runner,
@@ -101,18 +97,16 @@ async fn ble_advertise<C: Controller>(controller: C) {
         &mut adv_data[..],
     ).unwrap();
 
-    println!("\n=========================================");
-    println!("   BLE Advertising Active");
-    println!("   Device Name: {}", core::str::from_utf8(DEVICE_NAME).unwrap_or("RustRTOS"));
-    println!("=========================================\n");
+    println!("BLE Advertising Active");
+    println!("Device Name: {}", core::str::from_utf8(DEVICE_NAME).unwrap_or("RustRTOS"));
 
-    // 运行 BLE 协议栈和广播
+    // 运行BLE协议栈和广播
     let _ = join(
         runner.run(),
         async {
             loop {
                 println!("[BLE] Starting advertising...");
-                
+
                 match peripheral.advertise(
                     &Default::default(),
                     Advertisement::ConnectableScannableUndirected {
@@ -122,13 +116,13 @@ async fn ble_advertise<C: Controller>(controller: C) {
                 ).await {
                     Ok(advertiser) => {
                         println!("[BLE] Advertising started, waiting for connection...");
-                        
+
                         // 等待连接
                         match advertiser.accept().await {
                             Ok(conn) => {
                                 println!("[BLE] Connection established!");
                                 println!("[BLE] Peer: {:?}", conn.peer_address());
-                                
+
                                 // 保持连接直到断开
                                 while conn.is_connected() {
                                     Timer::after(embassy_time::Duration::from_secs(1)).await;
@@ -153,19 +147,17 @@ async fn ble_advertise<C: Controller>(controller: C) {
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) {
     init_heap();
-    
+
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    
-    println!("=========================================");
-    println!("   RustRTOS BLE Advertise Example");
-    println!("   ESP32-S3 @ 240MHz");
-    println!("=========================================");
+
+    println!("RustRTOS BLE Advertise Example");
+    println!("ESP32-S3 @ 240MHz");
 
     // 初始化时钟
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    // 初始化 esp-radio 控制器
+    // 初始化esp-radio控制器
     let radio_controller = match esp_radio::init() {
         Ok(ctrl) => {
             println!("esp-radio initialized successfully");
@@ -176,17 +168,17 @@ async fn main(_spawner: Spawner) {
             loop { core::hint::spin_loop(); }
         }
     };
-    
-    // 存储 radio_controller 到静态区
+
+    // 存储radio_controller到静态区
     static RADIO_CONTROLLER: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
     let radio_ref = RADIO_CONTROLLER.init(radio_controller);
-    
-    // 创建 BLE 控制器
+
+    // 创建BLE控制器
     let connector = BleConnector::new(radio_ref, peripherals.BT, Default::default()).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
-    
+
     println!("BLE controller initialized");
 
-    // 运行 BLE 广播
+    // 运行BLE广播
     ble_advertise(controller).await;
 }

@@ -1,30 +1,20 @@
-//! BLE (低功耗蓝牙) 模块
-//!
-//! 提供 ESP32-S3 的 BLE 功能支持，默认使用 trouble-host 协议栈，
-//! 也可通过 `ble-esp` feature 使用 esp-wifi 内置的 BLE 实现。
-//!
-//! # 功能
-//!
-//! - BLE 广播 (Advertising)
+//! BLE (低功耗蓝牙)模块
+//! 提供ESP32-S3的BLE功能支持，默认使用trouble-host协议栈，
+//! 也可通过ble-esp feature使用esp-wifi内置的BLE实现。
+//! 功能
+//! - BLE广播(Advertising)
 //! - GATT Server (外设角色)
 //! - GATT Client (中心角色)
 //! - 连接管理
-//! - 安全配对 (可选)
-//!
-//! # 示例
-//!
-//! ```ignore
+//! - 安全配对(可选)
+//! 示例
 //! use rustrtos::net::ble::{BleController, AdvertiseConfig};
-//!
 //! let mut controller = BleController::new(bt, radio_clk).await?;
-//!
 //! // 配置广播
 //! let config = AdvertiseConfig::default()
 //!     .with_name("RustRTOS")
 //!     .with_interval_ms(100);
-//!
 //! controller.start_advertising(config).await?;
-//! ```
 
 use core::fmt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -35,9 +25,9 @@ use heapless::{String, Vec};
 
 use super::config::*;
 
-// ===== 错误类型 =====
+// 错误类型
 
-/// BLE 错误类型
+/// BLE错误类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BleError {
     /// 未初始化
@@ -52,7 +42,7 @@ pub enum BleError {
     Disconnected,
     /// 配对失败
     PairingFailed,
-    /// GATT 操作失败
+    /// GATT操作失败
     GattError,
     /// 资源不足
     OutOfMemory,
@@ -88,9 +78,9 @@ impl fmt::Display for BleError {
     }
 }
 
-// ===== BLE 事件 =====
+// BLE事件
 
-/// BLE 事件类型
+/// BLE事件类型
 #[derive(Debug, Clone)]
 pub enum BleEvent {
     /// 广播已开始
@@ -111,11 +101,11 @@ pub enum BleEvent {
         /// 断开原因
         reason: DisconnectReason,
     },
-    /// MTU 已更新
+    /// MTU已更新
     MtuUpdated {
         /// 连接句柄
         conn_handle: u16,
-        /// 新的 MTU 值
+        /// 新的MTU值
         mtu: u16,
     },
     /// 收到写请求
@@ -148,7 +138,7 @@ pub enum BleEvent {
     },
 }
 
-/// BLE 断开原因
+/// BLE断开原因
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DisconnectReason {
     /// 未知原因
@@ -166,9 +156,9 @@ pub enum DisconnectReason {
     UnacceptableConnectionParameters,
 }
 
-// ===== BLE 状态 =====
+// BLE状态
 
-/// BLE 状态
+/// BLE状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BleState {
     /// 未初始化
@@ -180,28 +170,28 @@ pub enum BleState {
     Advertising,
     /// 已连接
     Connected,
-    /// 正在扫描 (中心角色)
+    /// 正在扫描(中心角色)
     Scanning,
 }
 
-// ===== 广播配置 =====
+// 广播配置
 
 /// 广播配置
 #[derive(Debug, Clone)]
 pub struct AdvertiseConfig {
     /// 设备名称
     pub name: String<32>,
-    /// 广播间隔 (毫秒)
+    /// 广播间隔(毫秒)
     pub interval_ms: u32,
     /// 是否可连接
     pub connectable: bool,
     /// 是否可扫描
     pub scannable: bool,
-    /// 广播数据 (最多 31 字节)
+    /// 广播数据(最多31字节)
     pub adv_data: Vec<u8, 31>,
-    /// 扫描响应数据 (最多 31 字节)
+    /// 扫描响应数据(最多31字节)
     pub scan_rsp_data: Vec<u8, 31>,
-    /// 广播超时 (0 = 无限)
+    /// 广播超时(0 = 无限)
     pub timeout_secs: u16,
 }
 
@@ -253,58 +243,58 @@ impl AdvertiseConfig {
     }
 }
 
-// ===== 连接信息 =====
+// 连接信息
 
-/// BLE 连接信息
+/// BLE连接信息
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionInfo {
     /// 连接句柄
     pub handle: u16,
     /// 对端地址
     pub peer_addr: [u8; 6],
-    /// 连接间隔 (1.25ms 单位)
+    /// 连接间隔(1.25ms单位)
     pub interval: u16,
     /// 从机延迟
     pub latency: u16,
-    /// 监督超时 (10ms 单位)
+    /// 监督超时(10ms单位)
     pub timeout: u16,
-    /// 当前 MTU
+    /// 当前MTU
     pub mtu: u16,
     /// 是否已绑定
     pub bonded: bool,
 }
 
-// ===== GATT 服务定义 =====
+// GATT服务定义
 
-/// GATT 服务 UUID
+/// GATT服务UUID
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Uuid {
-    /// 16 位 UUID
+    /// 16位UUID
     Uuid16(u16),
-    /// 128 位 UUID
+    /// 128位UUID
     Uuid128([u8; 16]),
 }
 
 impl Uuid {
-    /// 创建 16 位 UUID
+    /// 创建16位UUID
     pub const fn from_u16(uuid: u16) -> Self {
         Self::Uuid16(uuid)
     }
 
-    /// 创建 128 位 UUID
+    /// 创建128位UUID
     pub const fn from_u128(uuid: [u8; 16]) -> Self {
         Self::Uuid128(uuid)
     }
 }
 
-/// GATT 特征属性
+/// GATT特征属性
 #[derive(Debug, Clone, Copy)]
 pub struct CharacteristicProps {
     /// 可读
     pub read: bool,
-    /// 可写 (无响应)
+    /// 可写(无响应)
     pub write_without_response: bool,
-    /// 可写 (有响应)
+    /// 可写(有响应)
     pub write: bool,
     /// 通知
     pub notify: bool,
@@ -348,37 +338,36 @@ impl CharacteristicProps {
     }
 }
 
-/// GATT 特征定义
+/// GATT特征定义
 #[derive(Debug, Clone)]
 pub struct Characteristic {
     /// UUID
     pub uuid: Uuid,
     /// 属性
     pub props: CharacteristicProps,
-    /// 属性句柄 (由协议栈分配)
+    /// 属性句柄(由协议栈分配)
     pub handle: u16,
-    /// 值句柄 (由协议栈分配)
+    /// 值句柄(由协议栈分配)
     pub value_handle: u16,
 }
 
-/// GATT 服务定义
+/// GATT服务定义
 #[derive(Debug, Clone)]
 pub struct Service {
-    /// 服务 UUID
+    /// 服务UUID
     pub uuid: Uuid,
     /// 是否为主要服务
     pub primary: bool,
-    /// 服务句柄 (由协议栈分配)
+    /// 服务句柄(由协议栈分配)
     pub handle: u16,
     /// 特征数量
     pub characteristic_count: usize,
 }
 
-// ===== BLE 控制器 =====
+// BLE控制器
 
-/// BLE 控制器
-///
-/// 管理 BLE 连接和 GATT 服务。
+/// BLE控制器
+/// 管理BLE连接和GATT服务。
 pub struct BleController<'a> {
     /// 当前状态
     state: BleState,
@@ -395,7 +384,7 @@ pub struct BleController<'a> {
 }
 
 impl<'a> BleController<'a> {
-    /// 创建新的 BLE 控制器
+    /// 创建新的BLE控制器
     pub fn new(
         event_channel: &'a Channel<CriticalSectionRawMutex, BleEvent, BLE_EVENT_QUEUE_SIZE>,
         connected_signal: &'a Signal<CriticalSectionRawMutex, bool>,
@@ -410,22 +399,19 @@ impl<'a> BleController<'a> {
         }
     }
 
-    /// 初始化 BLE 硬件
-    ///
-    /// 注意：在调用此函数之前，必须先初始化 esp-radio:
-    /// ```ignore
+    /// 初始化BLE硬件
+    /// 注意：在调用此函数之前，必须先初始化esp-radio:
     /// let timg0 = TimerGroup::new(peripherals.TIMG0);
     /// esp_rtos::start(timg0.timer0);
     /// let _controller = esp_radio::init().unwrap();
-    /// ```
     pub async fn init(&mut self) -> Result<(), BleError> {
-        // esp-radio 的初始化在更高层完成
+        // esp-radio的初始化在更高层完成
         // 这里只是设置本地状态
         self.state = BleState::Idle;
-        
-        // 生成随机本地地址 (实际应从芯片获取)
+
+        // 生成随机本地地址(实际应从芯片获取)
         self.local_addr = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC];
-        
+
         Ok(())
     }
 
@@ -440,9 +426,8 @@ impl<'a> BleController<'a> {
     }
 
     /// 开始广播
-    ///
-    /// **注意**: 此函数仅管理状态。实际广播应通过 trouble-host 的
-    /// `Peripheral::advertise()` 完成。参见 `examples/ble_advertise.rs`。
+    /// 注意: 此函数仅管理状态。实际广播应通过trouble-host的
+    /// Peripheral::advertise()完成。参见examples/ble_advertise.rs。
     pub async fn start_advertising(&mut self, config: AdvertiseConfig) -> Result<(), BleError> {
         if self.state == BleState::Uninitialized {
             return Err(BleError::NotInitialized);
@@ -455,22 +440,21 @@ impl<'a> BleController<'a> {
         self.adv_config = Some(config);
         self.state = BleState::Advertising;
 
-        // 状态管理层 - 实际广播通过 trouble_host::Peripheral 完成
+        // 状态管理层 - 实际广播通过trouble_host::Peripheral完成
         let _ = self.event_channel.try_send(BleEvent::AdvertisingStarted);
 
         Ok(())
     }
 
     /// 停止广播
-    ///
-    /// **注意**: 此函数仅管理状态。实际停止应通过取消 trouble-host 的
-    /// advertise future 完成。
+    /// 注意: 此函数仅管理状态。实际停止应通过取消trouble-host的
+    /// advertise future完成。
     pub async fn stop_advertising(&mut self) -> Result<(), BleError> {
         if self.state != BleState::Advertising {
             return Ok(());
         }
 
-        // 状态管理层 - 停止广播通过取消 future 完成
+        // 状态管理层 - 停止广播通过取消future完成
         self.state = BleState::Idle;
         let _ = self.event_channel.try_send(BleEvent::AdvertisingStopped);
 
@@ -482,7 +466,7 @@ impl<'a> BleController<'a> {
         // 查找并移除连接
         if let Some(pos) = self.connections.iter().position(|c| c.handle == conn_handle) {
             let conn = self.connections.remove(pos);
-            
+
             let _ = self.event_channel.try_send(BleEvent::Disconnected {
                 conn_handle,
                 reason: DisconnectReason::LocalHostTerminated,
@@ -519,9 +503,8 @@ impl<'a> BleController<'a> {
     }
 
     /// 发送通知
-    ///
-    /// **注意**: 此函数仅记录状态。实际通知应通过 trouble-host 的
-    /// `Characteristic::notify()` 完成。参见 `examples/ble_gatt_server.rs`。
+    /// 注意: 此函数仅记录状态。实际通知应通过trouble-host的
+    /// Characteristic::notify()完成。参见examples/ble_gatt_server.rs。
     pub async fn notify(
         &self,
         conn_handle: u16,
@@ -532,7 +515,7 @@ impl<'a> BleController<'a> {
             return Err(BleError::Disconnected);
         }
 
-        // 状态管理层 - 实际通知通过 trouble_host GATT API 完成
+        // 状态管理层 - 实际通知通过trouble_host GATT API完成
         let _ = attr_handle; // 暂用于类型检查
         let _ = data;
         let _ = self.event_channel.try_send(BleEvent::NotificationSent { conn_handle });
@@ -540,12 +523,12 @@ impl<'a> BleController<'a> {
         Ok(())
     }
 
-    /// 接收 BLE 事件
+    /// 接收BLE事件
     pub async fn recv_event(&self) -> BleEvent {
         self.event_channel.receive().await
     }
 
-    /// 尝试接收 BLE 事件 (非阻塞)
+    /// 尝试接收BLE事件(非阻塞)
     pub fn try_recv_event(&self) -> Option<BleEvent> {
         self.event_channel.try_receive().ok()
     }
@@ -561,14 +544,14 @@ impl<'a> BleController<'a> {
                         interval: BLE_CONN_INTERVAL_MIN,
                         latency: BLE_SLAVE_LATENCY,
                         timeout: BLE_SUPERVISION_TIMEOUT,
-                        mtu: 23, // 默认 MTU
+                        mtu: 23, // 默认MTU
                         bonded: false,
                     };
-                    
+
                     if self.connections.push(conn.clone()).is_err() {
                         return Err(BleError::MaxConnectionsReached);
                     }
-                    
+
                     self.state = BleState::Connected;
                     return Ok(conn);
                 }
@@ -578,15 +561,15 @@ impl<'a> BleController<'a> {
     }
 }
 
-// ===== GATT Server =====
+// GATT Server
 
-/// GATT Server 构建器
+/// GATT Server构建器
 pub struct GattServerBuilder {
     services: Vec<Service, 8>,
 }
 
 impl GattServerBuilder {
-    /// 创建新的 GATT Server 构建器
+    /// 创建新的GATT Server构建器
     pub fn new() -> Self {
         Self {
             services: Vec::new(),
@@ -605,7 +588,7 @@ impl GattServerBuilder {
         self
     }
 
-    /// 构建 GATT Server
+    /// 构建GATT Server
     pub fn build(self) -> GattServer {
         GattServer {
             services: self.services,
@@ -630,20 +613,19 @@ impl GattServer {
         &self.services
     }
 
-    /// 注册到 BLE 控制器
-    ///
-    /// **注意**: 此函数为占位实现。trouble-host 的 GATT Server 应通过
-    /// `#[gatt_server]` 宏定义，然后通过 `GattConnection::with_attribute_server()` 注册。
-    /// 参见 `examples/ble_gatt_server.rs`。
+    /// 注册到BLE控制器
+    /// 注意: 此函数为占位实现。trouble-host的GATT Server应通过
+    /// #[gatt_server]宏定义，然后通过GattConnection::with_attribute_server()注册。
+    /// 参见examples/ble_gatt_server.rs。
     pub async fn register(&self, _controller: &mut BleController<'_>) -> Result<(), BleError> {
-        // 状态管理层 - 实际注册通过 trouble_host GATT 宏完成
+        // 状态管理层 - 实际注册通过trouble_host GATT宏完成
         Ok(())
     }
 }
 
-// ===== BLE 统计信息 =====
+// BLE统计信息
 
-/// BLE 统计信息
+/// BLE统计信息
 #[derive(Debug, Clone, Default)]
 pub struct BleStats {
     /// 广播包发送数量

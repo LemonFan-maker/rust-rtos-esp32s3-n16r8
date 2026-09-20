@@ -1,16 +1,15 @@
-//! ESP32 分区表支持
-//!
-//! 解析和管理 ESP32 分区表，支持定位文件系统分区
+//! ESP32分区表支持
+//! 解析和管理ESP32分区表，支持定位文件系统分区
 
 use core::fmt;
 
-/// 分区表魔数 (ESP-IDF 格式)
+/// 分区表魔数(ESP-IDF格式)
 const PARTITION_TABLE_MAGIC: u16 = 0xAA50;
 
 /// 分区表最大条目数
 const MAX_PARTITION_ENTRIES: usize = 95;
 
-/// 分区表在 Flash 中的偏移量 (默认 0x8000)
+/// 分区表在Flash中的偏移量(默认0x8000)
 pub const PARTITION_TABLE_OFFSET: u32 = 0x8000;
 
 /// 单个分区条目大小
@@ -42,25 +41,25 @@ impl From<u8> for PartitionType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DataSubType {
-    /// OTA 数据
+    /// OTA数据
     Ota = 0x00,
-    /// PHY 初始化数据
+    /// PHY初始化数据
     Phy = 0x01,
     /// NVS (Non-Volatile Storage)
     Nvs = 0x02,
     /// Core dump
     CoreDump = 0x03,
-    /// NVS 密钥
+    /// NVS密钥
     NvsKeys = 0x04,
-    /// eFuse 模拟
+    /// eFuse模拟
     EFuse = 0x05,
-    /// 未定义/用户自定义 (0x06-0x7F)
+    /// 未定义/用户自定义(0x06-0x7F)
     Undefined = 0x06,
-    /// SPIFFS 文件系统
+    /// SPIFFS文件系统
     Spiffs = 0x82,
-    /// FAT 文件系统
+    /// FAT文件系统
     Fat = 0x81,
-    /// LittleFS 文件系统 (用户自定义，常用 0x83)
+    /// LittleFS文件系统(用户自定义，常用0x83)
     LittleFs = 0x83,
     /// 未知子类型
     Unknown(u8),
@@ -85,7 +84,7 @@ impl From<u8> for DataSubType {
 }
 
 impl DataSubType {
-    /// 转换为 u8 值
+    /// 转换为u8值
     pub fn as_u8(&self) -> u8 {
         match self {
             Self::Ota => 0x00,
@@ -109,7 +108,7 @@ impl DataSubType {
 pub enum AppSubType {
     /// 工厂应用
     Factory = 0x00,
-    /// OTA 应用 0-15
+    /// OTA应用0-15
     Ota(u8),
     /// 测试应用
     Test = 0x20,
@@ -129,7 +128,7 @@ impl From<u8> for AppSubType {
 }
 
 impl AppSubType {
-    /// 转换为 u8 值
+    /// 转换为u8值
     pub fn as_u8(&self) -> u8 {
         match self {
             Self::Factory => 0x00,
@@ -161,15 +160,15 @@ impl From<u32> for PartitionFlags {
 /// 单个分区描述
 #[derive(Clone)]
 pub struct Partition {
-    /// 分区标签 (最长15字符 + null)
+    /// 分区标签(最长15字符 + null)
     pub label: heapless::String<16>,
     /// 分区类型
     pub partition_type: PartitionType,
-    /// 子类型 (原始值)
+    /// 子类型(原始值)
     pub subtype: u8,
-    /// 分区在 Flash 中的偏移量
+    /// 分区在Flash中的偏移量
     pub offset: u32,
-    /// 分区大小 (字节)
+    /// 分区大小(字节)
     pub size: u32,
     /// 分区标志
     pub flags: PartitionFlags,
@@ -189,7 +188,7 @@ impl Partition {
         let offset = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
         let size = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
 
-        // 解析标签 (12-27 字节，null 结尾)
+        // 解析标签(12-27字节，null结尾)
         let label_bytes = &data[12..28];
         let label_len = label_bytes.iter().position(|&b| b == 0).unwrap_or(16);
         let label_str = core::str::from_utf8(&label_bytes[..label_len]).ok()?;
@@ -236,17 +235,17 @@ impl Partition {
         }
     }
 
-    /// 检查是否为 LittleFS 分区
+    /// 检查是否为LittleFS分区
     pub fn is_littlefs(&self) -> bool {
         self.is_data() && self.subtype == DataSubType::LittleFs.as_u8()
     }
 
-    /// 检查是否为 SPIFFS 分区
+    /// 检查是否为SPIFFS分区
     pub fn is_spiffs(&self) -> bool {
         self.is_data() && self.subtype == DataSubType::Spiffs.as_u8()
     }
 
-    /// 检查是否为 NVS 分区
+    /// 检查是否为NVS分区
     pub fn is_nvs(&self) -> bool {
         self.is_data() && self.subtype == DataSubType::Nvs.as_u8()
     }
@@ -256,7 +255,7 @@ impl Partition {
         self.offset + self.size
     }
 
-    /// 计算分区包含的块数 (给定块大小)
+    /// 计算分区包含的块数(给定块大小)
     pub fn block_count(&self, block_size: u32) -> u32 {
         self.size / block_size
     }
@@ -289,13 +288,11 @@ impl PartitionTable {
         }
     }
 
-    /// 从 Flash 数据解析分区表
-    ///
-    /// # 参数
-    /// - `data`: 从 PARTITION_TABLE_OFFSET 读取的原始数据
-    ///
-    /// # 返回
-    /// 解析后的分区表，如果解析失败返回 None
+    /// 从Flash数据解析分区表
+    /// 参数
+    /// - data: 从PARTITION_TABLE_OFFSET读取的原始数据
+    /// 返回
+    /// 解析后的分区表，如果解析失败返回None
     pub fn from_flash_data(data: &[u8]) -> Option<Self> {
         let mut table = Self::new();
 
@@ -308,7 +305,7 @@ impl PartitionTable {
         for chunk in data.chunks_exact(PARTITION_ENTRY_SIZE) {
             let entry_data: &[u8; PARTITION_ENTRY_SIZE] = chunk.try_into().ok()?;
 
-            // 检查是否为结束标记 (全 0xFF 或魔数不匹配)
+            // 检查是否为结束标记(全0xFF或魔数不匹配)
             if entry_data[0] == 0xFF && entry_data[1] == 0xFF {
                 break;
             }
@@ -328,14 +325,13 @@ impl PartitionTable {
         }
     }
 
-    /// 手动创建分区 (用于已知分区布局)
-    ///
-    /// # 参数
-    /// - `label`: 分区标签
-    /// - `partition_type`: 分区类型
-    /// - `subtype`: 子类型
-    /// - `offset`: Flash 偏移量
-    /// - `size`: 分区大小
+    /// 手动创建分区(用于已知分区布局)
+    /// 参数
+    /// - label: 分区标签
+    /// - partition_type: 分区类型
+    /// - subtype: 子类型
+    /// - offset: Flash偏移量
+    /// - size: 分区大小
     pub fn add_partition(
         &mut self,
         label: &str,
@@ -362,17 +358,17 @@ impl PartitionTable {
         self.partitions.iter().find(|p| p.label.as_str() == label)
     }
 
-    /// 查找第一个 LittleFS 分区
+    /// 查找第一个LittleFS分区
     pub fn find_littlefs(&self) -> Option<&Partition> {
         self.partitions.iter().find(|p| p.is_littlefs())
     }
 
-    /// 查找第一个 SPIFFS 分区
+    /// 查找第一个SPIFFS分区
     pub fn find_spiffs(&self) -> Option<&Partition> {
         self.partitions.iter().find(|p| p.is_spiffs())
     }
 
-    /// 查找第一个 NVS 分区
+    /// 查找第一个NVS分区
     pub fn find_nvs(&self) -> Option<&Partition> {
         self.partitions.iter().find(|p| p.is_nvs())
     }
@@ -424,8 +420,7 @@ impl fmt::Debug for PartitionTable {
 pub mod presets {
     use super::*;
 
-    /// 创建默认 4MB Flash 分区布局
-    ///
+    /// 创建默认4MB Flash分区布局
     /// 布局:
     /// - nvs: 0x9000, 24KB
     /// - phy_init: 0xF000, 4KB
@@ -433,90 +428,88 @@ pub mod presets {
     /// - storage: 0x110000, ~2.9MB (LittleFS)
     pub fn default_4mb() -> PartitionTable {
         let mut table = PartitionTable::new();
-        
-        // NVS 分区
-        table.add_partition("nvs", PartitionType::Data, DataSubType::Nvs.as_u8(), 
+
+        // NVS分区
+        table.add_partition("nvs", PartitionType::Data, DataSubType::Nvs.as_u8(),
             0x9000, 0x6000).ok();
-        
-        // PHY 初始化数据
+
+        // PHY初始化数据
         table.add_partition("phy_init", PartitionType::Data, DataSubType::Phy.as_u8(),
             0xF000, 0x1000).ok();
-        
+
         // 工厂应用
         table.add_partition("factory", PartitionType::App, AppSubType::Factory.as_u8(),
             0x10000, 0x100000).ok();
-        
-        // LittleFS 存储分区 (剩余空间)
+
+        // LittleFS存储分区(剩余空间)
         table.add_partition("storage", PartitionType::Data, DataSubType::LittleFs.as_u8(),
             0x110000, 0x2F0000).ok();
-        
+
         table
     }
 
-    /// 创建 16MB Flash 分区布局 (适用于 ESP32-S3-N16R8)
-    ///
+    /// 创建16MB Flash分区布局(适用于ESP32-S3-N16R8)
     /// 布局:
     /// - nvs: 0x9000, 24KB
-    /// - phy_init: 0xF000, 4KB  
+    /// - phy_init: 0xF000, 4KB
     /// - factory: 0x10000, 4MB
     /// - ota_0: 0x410000, 4MB
     /// - ota_1: 0x810000, 4MB
     /// - storage: 0xC10000, ~4MB (LittleFS)
     pub fn default_16mb_ota() -> PartitionTable {
         let mut table = PartitionTable::new();
-        
-        // NVS 分区
+
+        // NVS分区
         table.add_partition("nvs", PartitionType::Data, DataSubType::Nvs.as_u8(),
             0x9000, 0x6000).ok();
-        
-        // PHY 初始化数据
+
+        // PHY初始化数据
         table.add_partition("phy_init", PartitionType::Data, DataSubType::Phy.as_u8(),
             0xF000, 0x1000).ok();
-        
-        // OTA 数据
+
+        // OTA数据
         table.add_partition("otadata", PartitionType::Data, DataSubType::Ota.as_u8(),
             0x10000, 0x2000).ok();
-        
+
         // 工厂应用
         table.add_partition("factory", PartitionType::App, AppSubType::Factory.as_u8(),
             0x12000, 0x400000).ok();
-        
-        // OTA 应用 0
+
+        // OTA应用0
         table.add_partition("ota_0", PartitionType::App, 0x10,  // OTA 0
             0x412000, 0x400000).ok();
-        
-        // OTA 应用 1
+
+        // OTA应用1
         table.add_partition("ota_1", PartitionType::App, 0x11,  // OTA 1
             0x812000, 0x400000).ok();
-        
-        // LittleFS 存储分区
+
+        // LittleFS存储分区
         table.add_partition("storage", PartitionType::Data, DataSubType::LittleFs.as_u8(),
             0xC12000, 0x3EE000).ok();
-        
+
         table
     }
 
-    /// 创建简单的单应用 16MB 布局 (最大存储空间)
-    ///
+    /// 创建简单的单应用16MB布局(最大存储空间)
     /// 布局:
     /// - nvs: 0x9000, 24KB
     /// - factory: 0x10000, 4MB
     /// - storage: 0x410000, ~12MB (LittleFS)
     pub fn simple_16mb() -> PartitionTable {
         let mut table = PartitionTable::new();
-        
-        // NVS 分区
+
+        // NVS分区
         table.add_partition("nvs", PartitionType::Data, DataSubType::Nvs.as_u8(),
             0x9000, 0x6000).ok();
-        
+
         // 工厂应用
         table.add_partition("factory", PartitionType::App, AppSubType::Factory.as_u8(),
             0x10000, 0x400000).ok();
-        
-        // LittleFS 存储分区 (剩余约 12MB)
+
+        // LittleFS存储分区(剩余约12MB)
         table.add_partition("storage", PartitionType::Data, DataSubType::LittleFs.as_u8(),
             0x410000, 0xBF0000).ok();
-        
+
         table
     }
 }

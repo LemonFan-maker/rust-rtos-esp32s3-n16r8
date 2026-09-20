@@ -1,6 +1,4 @@
-# ==============================================
-# ESP32-S3 Xtensa 编译配置 - 最激进性能优化
-# ==============================================
+# ESP32-S3 Xtensa编译配置 - 最激进性能优化
 
 [build]
 target = "xtensa-esp32s3-none-elf"
@@ -9,40 +7,40 @@ target = "xtensa-esp32s3-none-elf"
 runner = "probe-rs run --chip esp32s3"
 
 rustflags = [
-    # ===== 链接脚本 =====
-    # 自定义链接脚本目录 - 必须在前面以覆盖 esp-hal 的 rodata.x
+    # 链接脚本
+    # 自定义链接脚本目录 - 必须在前面以覆盖esp-hal的rodata.x
     "-C", "link-arg=-L./ld",
     "-C", "link-arg=-Tlinkall.x",
-    
-    # ===== 链接优化 =====
+
+    # 链接优化
     # 垃圾回收未使用段
     "-C", "link-arg=-Wl,--gc-sections",
-    
+
     # 链接器优化级别
     "-C", "link-arg=-Wl,-O3",
-    
-    # ===== 代码生成优化 =====
-    # 更激进的内联阈值
-    "-C", "inline-threshold=275",
-    
-    # 禁用红区 (嵌入式必须)
+
+    # 代码生成优化
+    # 更激进的内联阈值 (rustc 1.84+ 已移除 -C inline-threshold)
+    "-C", "llvm-args=--inline-threshold=275",
+
+    # 禁用红区(嵌入式必须)
     "-C", "no-redzone=yes",
 ]
 
-# ===== 环境变量 =====
+# 环境变量
 [env]
-# defmt 日志级别 - Release 时禁用
+# defmt日志级别 - Release时禁用
 DEFMT_LOG = { value = "off", force = true }
 
-# ESP 日志级别
+# ESP日志级别
 ESP_LOG = "warn"
 
-# ===== 不稳定特性 =====
+# 不稳定特性
 [unstable]
-# 启用 build-std 优化标准库
+# 启用build-std优化标准库
 build-std = ["core", "alloc"]
 
-# ===== 别名命令 =====
+# 别名命令
 [alias]
 # 快速构建并烧录
 br = "build --release"

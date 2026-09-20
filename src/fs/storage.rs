@@ -1,10 +1,9 @@
-//! Flash 存储抽象层
-//!
-//! 提供对 ESP32 SPI Flash 的读写抽象，支持 littlefs2 所需的块设备接口
+//! Flash存储抽象层
+//! 提供对ESP32 SPI Flash的读写抽象，支持littlefs2所需的块设备接口
 
 use core::fmt;
 use esp_hal::spi::master::SpiDmaBus;
-// DMA 通道通过 peripherals.DMA_CHx 获取
+// DMA通道通过peripherals.DMA_CHx获取
 
 /// 存储操作错误
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +26,7 @@ pub enum StorageError {
     NotInitialized,
     /// 校验失败
     VerifyError,
-    /// DMA 错误
+    /// DMA错误
     DmaError,
 }
 
@@ -48,16 +47,16 @@ impl fmt::Display for StorageError {
     }
 }
 
-/// Flash 存储配置
+/// Flash存储配置
 #[derive(Debug, Clone, Copy)]
 pub struct FlashConfig {
-    /// 总容量 (字节)
+    /// 总容量(字节)
     pub total_size: u32,
-    /// 扇区大小 (通常 4KB)
+    /// 扇区大小(通常4KB)
     pub sector_size: u32,
-    /// 块大小 (用于文件系统，通常 4KB)
+    /// 块大小(用于文件系统，通常4KB)
     pub block_size: u32,
-    /// 页面大小 (编程单位，通常 256B)
+    /// 页面大小(编程单位，通常256B)
     pub page_size: u32,
     /// 分区起始偏移
     pub partition_offset: u32,
@@ -78,9 +77,8 @@ impl Default for FlashConfig {
     }
 }
 
-/// Flash 存储抽象
-///
-/// 提供对指定 Flash 分区的读写操作
+/// Flash存储抽象
+/// 提供对指定Flash分区的读写操作
 pub struct FlashStorage {
     /// 配置
     config: FlashConfig,
@@ -89,7 +87,7 @@ pub struct FlashStorage {
 }
 
 impl FlashStorage {
-    /// 创建 Flash 存储实例
+    /// 创建Flash存储实例
     pub const fn new(config: FlashConfig) -> Self {
         Self {
             config,
@@ -156,7 +154,7 @@ impl FlashStorage {
         self.config.block_size
     }
 
-    /// 将块号转换为 Flash 绝对地址
+    /// 将块号转换为Flash绝对地址
     fn block_to_address(&self, block: u32) -> Result<u32, StorageError> {
         let offset = block * self.config.block_size;
         if offset >= self.config.partition_size {
@@ -165,10 +163,9 @@ impl FlashStorage {
         Ok(self.config.partition_offset + offset)
     }
 
-    /// 读取块数据 (内部 Flash 使用内存映射)
-    ///
-    /// # 安全性
-    /// ESP32 内部 Flash 映射到地址空间 0x3C000000+，可直接读取
+    /// 读取块数据(内部Flash使用内存映射)
+    /// 安全性
+    /// ESP32内部Flash映射到地址空间0x3C000000+，可直接读取
     pub fn read_block(&self, block: u32, buffer: &mut [u8]) -> Result<(), StorageError> {
         if !self.initialized {
             return Err(StorageError::NotInitialized);
@@ -179,11 +176,11 @@ impl FlashStorage {
         }
 
         let address = self.block_to_address(block)?;
-        
-        // ESP32-S3 Flash 映射地址
-        // 内部 Flash 映射到 0x3C000000 (数据) 或通过 SPI 访问
-        // 这里使用 ROM 函数或 SPI 读取
-        
+
+        // ESP32-S3 Flash映射地址
+        // 内部Flash映射到0x3C000000 (数据)或通过SPI访问
+        // 这里使用ROM函数或SPI读取
+
         unsafe {
             self.read_flash_internal(address, buffer)?;
         }
@@ -192,9 +189,8 @@ impl FlashStorage {
     }
 
     /// 写入块数据
-    ///
-    /// # 注意
-    /// Flash 写入前需要先擦除对应扇区
+    /// 注意
+    /// Flash写入前需要先擦除对应扇区
     pub fn write_block(&mut self, block: u32, data: &[u8]) -> Result<(), StorageError> {
         if !self.initialized {
             return Err(StorageError::NotInitialized);
@@ -214,8 +210,7 @@ impl FlashStorage {
     }
 
     /// 擦除块
-    ///
-    /// 将整个块设置为 0xFF
+    /// 将整个块设置为0xFF
     pub fn erase_block(&mut self, block: u32) -> Result<(), StorageError> {
         if !self.initialized {
             return Err(StorageError::NotInitialized);
@@ -225,7 +220,7 @@ impl FlashStorage {
 
         // 计算需要擦除的扇区数
         let sectors = self.config.block_size / self.config.sector_size;
-        
+
         for i in 0..sectors {
             let sector_addr = address + i * self.config.sector_size;
             unsafe {
@@ -236,56 +231,54 @@ impl FlashStorage {
         Ok(())
     }
 
-    /// 同步 (确保所有写入完成)
+    /// 同步(确保所有写入完成)
     pub fn sync(&mut self) -> Result<(), StorageError> {
         if !self.initialized {
             return Err(StorageError::NotInitialized);
         }
 
-        // Flash 写入是同步的，无需额外操作
+        // Flash写入是同步的，无需额外操作
         // 但可以在这里添加缓存刷新等操作
 
         Ok(())
     }
 
-    // ==================== 内部 Flash 操作 ====================
+    // 内部Flash操作
 
-    /// 内部 Flash 读取实现
-    ///
-    /// 使用 ESP32 ROM 函数或 SPI 读取
+    /// 内部Flash读取实现
+    /// 使用ESP32 ROM函数或SPI读取
     unsafe fn read_flash_internal(&self, address: u32, buffer: &mut [u8]) -> Result<(), StorageError> {
-        // ESP32-S3 内部 Flash 可通过缓存映射直接读取
+        // ESP32-S3内部Flash可通过缓存映射直接读取
         // 数据地址映射: 0x3C000000 + offset
-        
-        // 方法1: 通过内存映射读取 (需要确保地址在映射范围内)
-        // 方法2: 使用 SPI 读取命令
-        
-        // 简化实现: 假设 Flash 已映射到内存
-        // 实际实现需要根据 esp-hal 的 Flash 驱动
-        
+
+        // 方法1: 通过内存映射读取(需要确保地址在映射范围内)
+        // 方法2: 使用SPI读取命令
+
+        // 简化实现: 假设Flash已映射到内存
+        // 实际实现需要根据esp-hal的Flash驱动
+
         let flash_data_base: u32 = 0x3C000000;
         let mapped_addr = flash_data_base + address;
-        
+
         let src = mapped_addr as *const u8;
         core::ptr::copy_nonoverlapping(src, buffer.as_mut_ptr(), buffer.len());
-        
+
         Ok(())
     }
 
-    /// 内部 Flash 写入实现
-    ///
-    /// 使用 ESP32 ROM 函数进行编程
+    /// 内部Flash写入实现
+    /// 使用ESP32 ROM函数进行编程
     unsafe fn write_flash_internal(&mut self, address: u32, data: &[u8]) -> Result<(), StorageError> {
-        // ESP32 Flash 写入需要:
-        // 1. 禁用中断和缓存
-        // 2. 使用 ROM 函数或 SPI 命令
-        // 3. 等待写入完成
-        // 4. 恢复缓存和中断
-        
+        // ESP32 Flash写入需要:
+        // 1.禁用中断和缓存
+        // 2.使用ROM函数或SPI命令
+        // 3.等待写入完成
+        // 4.恢复缓存和中断
+
         // 按页面大小分块写入
         let page_size = self.config.page_size as usize;
         let mut offset = 0;
-        
+
         while offset < data.len() {
             let current_addr = address + offset as u32;
             let page_offset = (current_addr % self.config.page_size) as usize;
@@ -293,89 +286,78 @@ impl FlashStorage {
                 page_size - page_offset,
                 data.len() - offset
             );
-            
-            // 调用 ROM 函数写入
+
+            // 调用ROM函数写入
             // esp_rom_spiflash_write(current_addr, data[offset..].as_ptr(), write_size)
-            
-            // 占位实现 - 实际需要调用 esp-hal 的 Flash 写入 API
+
+            // 占位实现 - 实际需要调用esp-hal的Flash写入API
             self.write_page_internal(current_addr, &data[offset..offset + write_size])?;
-            
+
             offset += write_size;
         }
-        
+
         Ok(())
     }
 
     /// 写入单个页面
-    ///
-    /// # Safety
+    /// Safety
     /// 调用者必须确保地址有效且在分区范围内。
-    ///
-    /// # 实现说明
-    /// ESP32-S3 内部 Flash 写入需要使用 ROM 函数。
+    /// 实现说明
+    /// ESP32-S3内部Flash写入需要使用ROM函数。
     /// 直接内存映射只能读取，不能写入。
-    ///
-    /// 当前为占位实现，返回 Ok 但不执行实际写入。
-    /// 实际应用中应使用 esp-storage crate 或 esp-hal 的 flash API。
+    /// 当前为占位实现，返回Ok但不执行实际写入。
+    /// 实际应用中应使用esp-storage crate或esp-hal的flash API。
     unsafe fn write_page_internal(&mut self, _address: u32, _data: &[u8]) -> Result<(), StorageError> {
         // 实现步骤:
-        // 1. 禁用中断和 Cache
-        // 2. 发送 Write Enable 命令 (0x06)
-        // 3. 发送 Page Program 命令 (0x02) + 地址 + 数据
-        // 4. 轮询 Status Register 等待 WIP 位清零
-        // 5. 恢复 Cache 和中断
-        //
+        // 1.禁用中断和Cache
+        // 2.发送Write Enable命令(0x06)
+        // 3.发送Page Program命令(0x02) + 地址 + 数据
+        // 4.轮询Status Register等待WIP位清零
+        // 5.恢复Cache和中断
         // 可选方案:
         // - esp-storage crate: https://github.com/esp-rs/esp-storage
-        // - esp_rom_spiflash_write() ROM 函数
-        //
-        // 占位实现 - 返回 Ok 但不执行实际写入
+        // - esp_rom_spiflash_write() ROM函数
+        // 占位实现 - 返回Ok但不执行实际写入
         // 这允许编译和基本测试，但不会持久化数据
         Ok(())
     }
 
     /// 擦除单个扇区
-    ///
-    /// # Safety
+    /// Safety
     /// 调用者必须确保地址有效且在分区范围内。
-    ///
-    /// # 实现说明
+    /// 实现说明
     /// 扇区擦除通常需要几十到几百毫秒。
-    ///
-    /// 当前为占位实现，返回 Ok 但不执行实际擦除。
-    /// 实际应用中应使用 esp-storage crate 或 esp-hal 的 flash API。
+    /// 当前为占位实现，返回Ok但不执行实际擦除。
+    /// 实际应用中应使用esp-storage crate或esp-hal的flash API。
     unsafe fn erase_sector_internal(&mut self, _address: u32) -> Result<(), StorageError> {
         // 实现步骤:
-        // 1. 禁用中断和 Cache
-        // 2. 发送 Write Enable 命令 (0x06)
-        // 3. 发送 Sector Erase 命令 (0x20) + 地址
-        // 4. 轮询 Status Register 等待擦除完成 (通常 50-200ms)
-        // 5. 恢复 Cache 和中断
-        //
+        // 1.禁用中断和Cache
+        // 2.发送Write Enable命令(0x06)
+        // 3.发送Sector Erase命令(0x20) + 地址
+        // 4.轮询Status Register等待擦除完成(通常50-200ms)
+        // 5.恢复Cache和中断
         // 可选方案:
         // - esp-storage crate: https://github.com/esp-rs/esp-storage
-        // - esp_rom_spiflash_erase_sector() ROM 函数
-        //
-        // 占位实现 - 返回 Ok 但不执行实际擦除
-        // 这允许编译和基本测试，但不会修改 Flash 内容
+        // - esp_rom_spiflash_erase_sector() ROM函数
+        // 占位实现 - 返回Ok但不执行实际擦除
+        // 这允许编译和基本测试，但不会修改Flash内容
         Ok(())
     }
 }
 
-/// 外部 SPI Flash 存储
-///
-/// 用于连接外部 SPI Flash 芯片
+/// 外部SPI Flash存储
+/// 用于连接外部SPI Flash芯片
 pub struct ExternalFlash<'d> {
     /// 配置
     config: FlashConfig,
-    /// SPI 总线 (使用 DMA)
+    /// SPI总线(使用DMA)
     _spi: Option<SpiDmaBus<'d, esp_hal::Blocking>>,
-    /// CS 引脚状态
+    /// CS引脚状态
     cs_active: bool,
 }
 
 impl<'d> ExternalFlash<'d> {
-    /// 创建外部 Flash 实例
+    /// 创建外部Flash实例
     pub fn new(config: FlashConfig) -> Self {
         Self {
             config,
@@ -384,27 +366,26 @@ impl<'d> ExternalFlash<'d> {
         }
     }
 
-    /// 配置 SPI 总线
+    /// 配置SPI总线
     pub fn with_spi(mut self, spi: SpiDmaBus<'d, esp_hal::Blocking>) -> Self {
         self._spi = Some(spi);
         self
     }
 
-    /// 读取 JEDEC ID
-    ///
-    /// 当前为占位实现，返回全零 ID。
-    /// 实际应用应使用 `SpiDmaBus::transfer()` 执行 SPI 传输。
+    /// 读取JEDEC ID
+    /// 当前为占位实现，返回全零ID。
+    /// 实际应用应使用SpiDmaBus::transfer()执行SPI传输。
     pub fn read_jedec_id(&mut self) -> Result<[u8; 3], StorageError> {
         let _spi = self._spi.as_mut().ok_or(StorageError::NotInitialized)?;
-        
-        // JEDEC ID 命令: 0x9F
-        // 响应: 3 字节 (Manufacturer, Memory Type, Capacity)
+
+        // JEDEC ID命令: 0x9F
+        // 响应: 3字节(Manufacturer, Memory Type, Capacity)
         let id = [0u8; 3];
-        
-        // 占位实现 - 实际应用应使用 SPI 传输:
+
+        // 占位实现 - 实际应用应使用SPI传输:
         // let cmd = [0x9F];
         // self._spi.transfer(&cmd, &mut id)?;
-        
+
         Ok(id)
     }
 
@@ -414,15 +395,13 @@ impl<'d> ExternalFlash<'d> {
     }
 }
 
-/// 用于 littlefs2 的块设备特征实现
-/// 
-/// 这个模块提供 FlashStorage 到 littlefs2 Storage trait 的适配
+/// 用于littlefs2的块设备特征实现
+/// 这个模块提供FlashStorage到littlefs2 Storage trait的适配
 pub mod littlefs_adapter {
     use super::*;
-    
-    /// LittleFS 存储适配器
-    /// 
-    /// 包装 FlashStorage 实现 littlefs2 所需的接口
+
+    /// LittleFS存储适配器
+    /// 包装FlashStorage实现littlefs2所需的接口
     pub struct LfsStorageAdapter {
         storage: FlashStorage,
     }
@@ -445,9 +424,9 @@ pub mod littlefs_adapter {
 
         /// 读取操作
         pub fn read(&self, block: u32, offset: u32, buffer: &mut [u8]) -> Result<(), StorageError> {
-            // littlefs2 可能读取块内的部分数据
+            // littlefs2可能读取块内的部分数据
             let block_size = self.storage.config.block_size;
-            
+
             if offset + buffer.len() as u32 > block_size {
                 return Err(StorageError::OutOfBounds);
             }
@@ -459,23 +438,23 @@ pub mod littlefs_adapter {
             }
 
             // 部分读取 - 需要临时缓冲区
-            // 注意: 在 no_std 环境中，可能需要使用固定大小的栈缓冲区
-            let mut temp = [0u8; 4096]; // 假设最大块大小为 4KB
+            // 注意: 在no_std环境中，可能需要使用固定大小的栈缓冲区
+            let mut temp = [0u8; 4096]; // 假设最大块大小为4KB
             self.storage.read_block(block, &mut temp[..block_size as usize])?;
             buffer.copy_from_slice(&temp[offset as usize..offset as usize + buffer.len()]);
 
             Ok(())
         }
 
-        /// 写入操作 (编程)
+        /// 写入操作(编程)
         pub fn prog(&mut self, block: u32, offset: u32, data: &[u8]) -> Result<(), StorageError> {
             let block_size = self.storage.config.block_size;
-            
+
             if offset + data.len() as u32 > block_size {
                 return Err(StorageError::OutOfBounds);
             }
 
-            // 计算实际 Flash 地址
+            // 计算实际Flash地址
             let base_addr = self.storage.block_to_address(block)?;
             let write_addr = base_addr + offset;
 
@@ -530,9 +509,9 @@ mod tests {
             partition_size: 0x200000,
         });
 
-        // 块 0 -> 分区起始
+        // 块0 ->分区起始
         assert_eq!(storage.block_to_address(0).unwrap(), 0x100000);
-        // 块 1 -> 分区起始 + 块大小
+        // 块1 ->分区起始 + 块大小
         assert_eq!(storage.block_to_address(1).unwrap(), 0x101000);
     }
 }

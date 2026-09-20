@@ -1,27 +1,18 @@
-//! TCP/IP 网络栈模块
-//!
-//! 基于 embassy-net 和 smoltcp 提供 TCP/UDP Socket 抽象。
-//!
-//! # 功能
-//!
-//! - TCP 客户端/服务器
+//! TCP/IP网络栈模块
+//! 基于embassy-net和smoltcp提供TCP/UDP Socket抽象。
+//! 功能
+//! - TCP客户端/服务器
 //! - UDP Socket
-//! - DNS 解析
-//! - DHCP 客户端
-//!
-//! # 示例
-//!
-//! ```ignore
+//! - DNS解析
+//! - DHCP客户端
+//! 示例
 //! use rustrtos::net::tcp::{TcpClient, NetworkStack};
-//!
 //! // 获取网络栈
 //! let stack = NetworkStack::new(wifi_device);
-//!
-//! // TCP 客户端连接
+//! // TCP客户端连接
 //! let mut client = TcpClient::new(&stack);
 //! client.connect("192.168.1.1:80").await?;
 //! client.write(b"GET / HTTP/1.1\r\n\r\n").await?;
-//! ```
 
 use core::fmt;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -32,7 +23,7 @@ use heapless::Vec;
 
 use super::config::*;
 
-// ===== 错误类型 =====
+// 错误类型
 
 /// 网络错误类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +42,7 @@ pub enum NetworkError {
     DnsResolutionFailed,
     /// 无效地址
     InvalidAddress,
-    /// Socket 已关闭
+    /// Socket已关闭
     SocketClosed,
     /// 缓冲区已满
     BufferFull,
@@ -94,9 +85,9 @@ impl fmt::Display for NetworkError {
     }
 }
 
-// ===== IP 地址类型 =====
+// IP地址类型
 
-/// IPv4 地址
+/// IPv4地址
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Ipv4Address(pub [u8; 4]);
 
@@ -106,13 +97,13 @@ impl Ipv4Address {
         Self([a, b, c, d])
     }
 
-    /// 未指定地址 (0.0.0.0)
+    /// 未指定地址(0.0.0.0)
     pub const UNSPECIFIED: Self = Self([0, 0, 0, 0]);
 
-    /// 本地回环地址 (127.0.0.1)
+    /// 本地回环地址(127.0.0.1)
     pub const LOCALHOST: Self = Self([127, 0, 0, 1]);
 
-    /// 广播地址 (255.255.255.255)
+    /// 广播地址(255.255.255.255)
     pub const BROADCAST: Self = Self([255, 255, 255, 255]);
 
     /// 转换为字节数组
@@ -138,7 +129,7 @@ impl From<Ipv4Addr> for Ipv4Address {
     }
 }
 
-// ===== 网络栈 =====
+// 网络栈
 
 /// 网络栈状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -146,9 +137,9 @@ pub enum StackState {
     /// 未初始化
     #[default]
     Uninitialized,
-    /// 已初始化但无 IP
+    /// 已初始化但无IP
     NoIp,
-    /// 正在获取 IP (DHCP)
+    /// 正在获取IP (DHCP)
     GettingIp,
     /// 已就绪
     Ready,
@@ -157,15 +148,15 @@ pub enum StackState {
 /// 网络栈配置
 #[derive(Debug, Clone)]
 pub struct StackConfig {
-    /// 是否启用 DHCP
+    /// 是否启用DHCP
     pub dhcp: bool,
-    /// 静态 IP 地址
+    /// 静态IP地址
     pub static_ip: Option<Ipv4Address>,
     /// 子网掩码
     pub netmask: Option<Ipv4Address>,
     /// 网关
     pub gateway: Option<Ipv4Address>,
-    /// DNS 服务器
+    /// DNS服务器
     pub dns: Option<Ipv4Address>,
 }
 
@@ -182,31 +173,30 @@ impl Default for StackConfig {
 }
 
 impl StackConfig {
-    /// 使用静态 IP 配置
+    /// 使用静态IP配置
     pub fn with_static(ip: Ipv4Address, netmask: Ipv4Address, gateway: Ipv4Address) -> Self {
         Self {
             dhcp: false,
             static_ip: Some(ip),
             netmask: Some(netmask),
             gateway: Some(gateway),
-            dns: Some(gateway), // 默认使用网关作为 DNS
+            dns: Some(gateway), // 默认使用网关作为DNS
         }
     }
 }
 
 /// 网络栈
-///
-/// 封装 embassy-net 提供的网络功能。
+/// 封装embassy-net提供的网络功能。
 pub struct NetworkStack<'a> {
     /// 状态
     state: StackState,
     /// 配置
     config: StackConfig,
-    /// 本地 IP 地址
+    /// 本地IP地址
     local_ip: Option<Ipv4Address>,
     /// 网关地址
     gateway: Option<Ipv4Address>,
-    /// DNS 服务器
+    /// DNS服务器
     dns_server: Option<Ipv4Address>,
     /// 生命周期标记
     _marker: core::marker::PhantomData<&'a ()>,
@@ -226,30 +216,28 @@ impl<'a> NetworkStack<'a> {
     }
 
     /// 初始化网络栈
-    ///
-    /// **注意**: 此函数仅初始化状态。实际网络栈应通过 embassy-net 配置。
-    /// 参见 `examples/tcp_client.rs`。
+    /// 注意: 此函数仅初始化状态。实际网络栈应通过embassy-net配置。
+    /// 参见examples/tcp_client.rs。
     pub async fn init(&mut self) -> Result<(), NetworkError> {
-        // 状态管理层 - 实际网络栈通过 embassy_net::Stack 初始化
+        // 状态管理层 - 实际网络栈通过embassy_net::Stack初始化
         self.state = StackState::NoIp;
         Ok(())
     }
 
-    /// 启动 DHCP 客户端
-    ///
-    /// **注意**: 此函数返回默认 IP。实际 DHCP 应通过 `embassy_net::DhcpConfig` 配置。
-    /// 成功获取 IP 后调用 `set_addresses()` 更新状态。
+    /// 启动DHCP客户端
+    /// 注意: 此函数返回默认IP。实际DHCP应通过embassy_net::DhcpConfig配置。
+    /// 成功获取IP后调用set_addresses()更新状态。
     pub async fn start_dhcp(&mut self) -> Result<(), NetworkError> {
         if self.state == StackState::Uninitialized {
             return Err(NetworkError::NotInitialized);
         }
 
         self.state = StackState::GettingIp;
-        
-        // 状态管理层 - 实际 DHCP 通过 embassy_net::DhcpConfig 完成
-        // 返回默认 IP 以允许测试
+
+        // 状态管理层 - 实际DHCP通过embassy_net::DhcpConfig完成
+        // 返回默认IP以允许测试
         Timer::after(Duration::from_millis(100)).await;
-        
+
         self.local_ip = Some(Ipv4Address::new(192, 168, 1, 100));
         self.gateway = Some(Ipv4Address::new(192, 168, 1, 1));
         self.dns_server = Some(Ipv4Address::new(8, 8, 8, 8));
@@ -258,7 +246,7 @@ impl<'a> NetworkStack<'a> {
         Ok(())
     }
 
-    /// 设置静态 IP
+    /// 设置静态IP
     pub async fn set_static_ip(
         &mut self,
         ip: Ipv4Address,
@@ -281,7 +269,7 @@ impl<'a> NetworkStack<'a> {
         self.state
     }
 
-    /// 获取本地 IP 地址
+    /// 获取本地IP地址
     pub fn local_ip(&self) -> Option<Ipv4Address> {
         self.local_ip
     }
@@ -291,7 +279,7 @@ impl<'a> NetworkStack<'a> {
         self.gateway
     }
 
-    /// 获取 DNS 服务器
+    /// 获取DNS服务器
     pub fn dns_server(&self) -> Option<Ipv4Address> {
         self.dns_server
     }
@@ -301,23 +289,22 @@ impl<'a> NetworkStack<'a> {
         self.state == StackState::Ready
     }
 
-    /// DNS 解析
-    ///
-    /// **注意**: 此函数返回错误。实际 DNS 解析应通过
-    /// `embassy_net::dns::DnsQueryType::A` 和 `Stack::dns_query()` 完成。
+    /// DNS解析
+    /// 注意: 此函数返回错误。实际DNS解析应通过
+    /// embassy_net::dns::DnsQueryType::A和Stack::dns_query()完成。
     pub async fn dns_resolve(&self, _hostname: &str) -> Result<Ipv4Address, NetworkError> {
         if self.state != StackState::Ready {
             return Err(NetworkError::NotInitialized);
         }
 
-        // 状态管理层 - 实际 DNS 解析通过 embassy_net Stack 完成
+        // 状态管理层 - 实际DNS解析通过embassy_net Stack完成
         Err(NetworkError::DnsResolutionFailed)
     }
 }
 
-// ===== TCP Client =====
+// TCP Client
 
-/// TCP Socket 状态
+/// TCP Socket状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TcpState {
     /// 已关闭
@@ -331,7 +318,7 @@ pub enum TcpState {
     Closing,
 }
 
-/// TCP 客户端
+/// TCP客户端
 pub struct TcpClient<'a> {
     /// 状态
     state: TcpState,
@@ -348,7 +335,7 @@ pub struct TcpClient<'a> {
 }
 
 impl<'a> TcpClient<'a> {
-    /// 创建新的 TCP 客户端
+    /// 创建新的TCP客户端
     pub fn new() -> Self {
         Self {
             state: TcpState::Closed,
@@ -361,9 +348,8 @@ impl<'a> TcpClient<'a> {
     }
 
     /// 连接到远程地址
-    ///
-    /// **注意**: 此函数仅更新状态。实际 TCP 连接应通过
-    /// `embassy_net::tcp::TcpSocket::connect()` 完成。
+    /// 注意: 此函数仅更新状态。实际TCP连接应通过
+    /// embassy_net::tcp::TcpSocket::connect()完成。
     pub async fn connect(&mut self, addr: SocketAddrV4) -> Result<(), NetworkError> {
         if self.state != TcpState::Closed {
             return Err(NetworkError::InternalError);
@@ -372,65 +358,62 @@ impl<'a> TcpClient<'a> {
         self.state = TcpState::Connecting;
         self.remote_addr = Some(addr);
 
-        // 状态管理层 - 实际连接通过 embassy_net::tcp::TcpSocket 完成
+        // 状态管理层 - 实际连接通过embassy_net::tcp::TcpSocket完成
         let timeout = Duration::from_secs(TCP_CONNECT_TIMEOUT_SECS as u64);
         let _ = timeout; // 仅用于类型检查
-        
+
         // 状态转换延迟
         Timer::after(Duration::from_millis(100)).await;
-        
+
         self.state = TcpState::Connected;
         self.local_port = 49152; // 动态端口
 
         Ok(())
     }
 
-    /// 连接到 IP 和端口
+    /// 连接到IP和端口
     pub async fn connect_to(&mut self, ip: Ipv4Address, port: u16) -> Result<(), NetworkError> {
         let addr = SocketAddrV4::new(ip.to_std(), port);
         self.connect(addr).await
     }
 
     /// 发送数据
-    ///
-    /// **注意**: 此函数返回数据长度但不真正发送。实际发送应通过
-    /// `embassy_net::tcp::TcpSocket::write()` 完成。
+    /// 注意: 此函数返回数据长度但不真正发送。实际发送应通过
+    /// embassy_net::tcp::TcpSocket::write()完成。
     pub async fn write(&mut self, data: &[u8]) -> Result<usize, NetworkError> {
         if self.state != TcpState::Connected {
             return Err(NetworkError::NotConnected);
         }
 
-        // 状态管理层 - 实际发送通过 embassy_net::tcp::TcpSocket 完成
+        // 状态管理层 - 实际发送通过embassy_net::tcp::TcpSocket完成
         Ok(data.len())
     }
 
     /// 接收数据
-    ///
-    /// **注意**: 此函数返回 0 字节。实际接收应通过
-    /// `embassy_net::tcp::TcpSocket::read()` 完成。
+    /// 注意: 此函数返回0字节。实际接收应通过
+    /// embassy_net::tcp::TcpSocket::read()完成。
     pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize, NetworkError> {
         if self.state != TcpState::Connected {
             return Err(NetworkError::NotConnected);
         }
 
-        // 状态管理层 - 实际接收通过 embassy_net::tcp::TcpSocket 完成
+        // 状态管理层 - 实际接收通过embassy_net::tcp::TcpSocket完成
         let _ = buf; // 仅用于类型检查
         Ok(0)
     }
 
     /// 关闭连接
-    ///
-    /// **注意**: 此函数仅更新状态。实际关闭应通过
-    /// `embassy_net::tcp::TcpSocket::close()` 完成。
+    /// 注意: 此函数仅更新状态。实际关闭应通过
+    /// embassy_net::tcp::TcpSocket::close()完成。
     pub async fn close(&mut self) -> Result<(), NetworkError> {
         if self.state == TcpState::Closed {
             return Ok(());
         }
 
         self.state = TcpState::Closing;
-        
-        // 状态管理层 - 实际关闭通过 embassy_net::tcp::TcpSocket 完成
-        
+
+        // 状态管理层 - 实际关闭通过embassy_net::tcp::TcpSocket完成
+
         self.state = TcpState::Closed;
         self.remote_addr = None;
         self.rx_buffer.clear();
@@ -466,9 +449,9 @@ impl<'a> Default for TcpClient<'a> {
     }
 }
 
-// ===== TCP Server =====
+// TCP Server
 
-/// TCP 服务器
+/// TCP服务器
 pub struct TcpServer<'a> {
     /// 监听端口
     port: u16,
@@ -479,7 +462,7 @@ pub struct TcpServer<'a> {
 }
 
 impl<'a> TcpServer<'a> {
-    /// 创建新的 TCP 服务器
+    /// 创建新的TCP服务器
     pub fn new(port: u16) -> Self {
         Self {
             port,
@@ -489,26 +472,24 @@ impl<'a> TcpServer<'a> {
     }
 
     /// 开始监听
-    ///
-    /// **注意**: 此函数仅更新状态。实际监听应通过
-    /// `embassy_net::tcp::TcpSocket::accept()` 完成。
+    /// 注意: 此函数仅更新状态。实际监听应通过
+    /// embassy_net::tcp::TcpSocket::accept()完成。
     pub async fn listen(&mut self) -> Result<(), NetworkError> {
-        // 状态管理层 - 实际监听通过 embassy_net::tcp::TcpSocket 完成
+        // 状态管理层 - 实际监听通过embassy_net::tcp::TcpSocket完成
         self.listening = true;
         Ok(())
     }
 
     /// 接受连接
-    ///
-    /// **注意**: 此函数永远等待。实际接受应通过
-    /// `embassy_net::tcp::TcpSocket::accept()` 完成。
+    /// 注意: 此函数永远等待。实际接受应通过
+    /// embassy_net::tcp::TcpSocket::accept()完成。
     pub async fn accept(&mut self) -> Result<TcpClient<'a>, NetworkError> {
         if !self.listening {
             return Err(NetworkError::NotInitialized);
         }
 
-        // 状态管理层 - 实际接受通过 embassy_net::tcp::TcpSocket 完成
-        // 此处永远等待，应用层应直接使用 embassy-net
+        // 状态管理层 - 实际接受通过embassy_net::tcp::TcpSocket完成
+        // 此处永远等待，应用层应直接使用embassy-net
         loop {
             Timer::after(Duration::from_millis(100)).await;
         }
@@ -531,7 +512,7 @@ impl<'a> TcpServer<'a> {
     }
 }
 
-// ===== UDP Socket =====
+// UDP Socket
 
 /// UDP Socket
 pub struct UdpSocket<'a> {
@@ -546,7 +527,7 @@ pub struct UdpSocket<'a> {
 }
 
 impl<'a> UdpSocket<'a> {
-    /// 创建新的 UDP Socket
+    /// 创建新的UDP Socket
     pub fn new() -> Self {
         Self {
             local_port: 0,
@@ -557,48 +538,45 @@ impl<'a> UdpSocket<'a> {
     }
 
     /// 绑定到端口
-    ///
-    /// **注意**: 此函数仅更新状态。实际绑定应通过
-    /// `embassy_net::udp::UdpSocket::bind()` 完成。
+    /// 注意: 此函数仅更新状态。实际绑定应通过
+    /// embassy_net::udp::UdpSocket::bind()完成。
     pub async fn bind(&mut self, port: u16) -> Result<(), NetworkError> {
-        // 状态管理层 - 实际绑定通过 embassy_net::udp::UdpSocket 完成
+        // 状态管理层 - 实际绑定通过embassy_net::udp::UdpSocket完成
         self.local_port = port;
         self.bound = true;
         Ok(())
     }
 
     /// 发送数据到指定地址
-    ///
-    /// **注意**: 此函数返回数据长度但不真正发送。实际发送应通过
-    /// `embassy_net::udp::UdpSocket::send_to()` 完成。
+    /// 注意: 此函数返回数据长度但不真正发送。实际发送应通过
+    /// embassy_net::udp::UdpSocket::send_to()完成。
     pub async fn send_to(&self, data: &[u8], addr: SocketAddrV4) -> Result<usize, NetworkError> {
         if !self.bound {
             return Err(NetworkError::NotInitialized);
         }
 
-        // 状态管理层 - 实际发送通过 embassy_net::udp::UdpSocket 完成
+        // 状态管理层 - 实际发送通过embassy_net::udp::UdpSocket完成
         let _ = addr; // 仅用于类型检查
         Ok(data.len())
     }
 
     /// 接收数据
-    ///
-    /// **注意**: 此函数永远等待。实际接收应通过
-    /// `embassy_net::udp::UdpSocket::recv_from()` 完成。
+    /// 注意: 此函数永远等待。实际接收应通过
+    /// embassy_net::udp::UdpSocket::recv_from()完成。
     pub async fn recv_from(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddrV4), NetworkError> {
         if !self.bound {
             return Err(NetworkError::NotInitialized);
         }
 
-        // 状态管理层 - 实际接收通过 embassy_net::udp::UdpSocket 完成
-        // 此处永远等待，应用层应直接使用 embassy-net
+        // 状态管理层 - 实际接收通过embassy_net::udp::UdpSocket完成
+        // 此处永远等待，应用层应直接使用embassy-net
         let _ = buf; // 仅用于类型检查
         loop {
             Timer::after(Duration::from_millis(100)).await;
         }
     }
 
-    /// 关闭 Socket
+    /// 关闭Socket
     pub async fn close(&mut self) -> Result<(), NetworkError> {
         self.bound = false;
         self.local_port = 0;
@@ -622,7 +600,7 @@ impl<'a> Default for UdpSocket<'a> {
     }
 }
 
-// ===== 网络统计 =====
+// 网络统计
 
 /// 网络统计信息
 #[derive(Debug, Clone, Default)]

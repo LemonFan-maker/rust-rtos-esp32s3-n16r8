@@ -1,11 +1,7 @@
-//! WiFi 扫描示例 - 使用真实 esp-radio API
-//!
-//! 演示如何扫描周围的 WiFi 网络。
-//!
-//! # 运行
-//! ```bash
+//! WiFi扫描示例 - 使用真实esp-radio API
+//! 演示如何扫描周围的WiFi网络。
+//! 运行
 //! cargo run --example wifi_scan --features wifi,dev --release
-//! ```
 
 #![no_std]
 #![no_main]
@@ -22,7 +18,7 @@ use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use static_cell::StaticCell;
 
-// 直接使用 esp-radio API
+// 直接使用esp-radio API
 use esp_radio::wifi::{
     ModeConfig, WifiController, ClientConfig,
 };
@@ -31,7 +27,7 @@ use esp_radio::wifi::{
 fn init_heap() {
     const HEAP_SIZE: usize = 72 * 1024;
     static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
-    
+
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
             HEAP.as_mut_ptr() as *mut u8,
@@ -58,35 +54,35 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-/// WiFi 扫描任务
+/// WiFi扫描任务
 #[embassy_executor::task]
 async fn wifi_scan_task(wifi_ctrl: &'static mut WifiController<'static>) {
     println!("WiFi scan task started");
-    
-    // 配置为 Station 模式 (仅用于扫描，不需要密码)
+
+    // 配置为Station模式(仅用于扫描，不需要密码)
     let station_config = ModeConfig::Client(ClientConfig::default());
-    
+
     if let Err(e) = wifi_ctrl.set_config(&station_config) {
         println!("WiFi set config failed: {:?}", e);
         return;
     }
-    
-    // 启动 WiFi
+
+    // 启动WiFi
     if let Err(e) = wifi_ctrl.start_async().await {
         println!("WiFi start failed: {:?}", e);
         return;
     }
-    
+
     println!("WiFi started successfully");
-    
+
     // 循环扫描
     let mut scan_count = 0u32;
-    
+
     loop {
         scan_count += 1;
-        println!("\n========== WiFi Scan #{} ==========", scan_count);
-        
-        // 执行扫描 (使用默认配置)
+        println!("WiFi Scan #{}", scan_count);
+
+        // 执行扫描(使用默认配置)
         match wifi_ctrl.scan_with_config_async(Default::default()).await {
             Ok(results) => {
                 if results.is_empty() {
@@ -94,8 +90,7 @@ async fn wifi_scan_task(wifi_ctrl: &'static mut WifiController<'static>) {
                 } else {
                     println!("Found {} networks:", results.len());
                     println!("{:<32} {:>6} {:>4} {:>8}", "SSID", "RSSI", "CH", "Auth");
-                    println!("------------------------------------------------------------");
-                    
+
                     for ap in results {
                         println!(
                             "{:<32} {:>4}dBm {:>4} {:>8?}",
@@ -111,8 +106,8 @@ async fn wifi_scan_task(wifi_ctrl: &'static mut WifiController<'static>) {
                 println!("Scan failed: {:?}", e);
             }
         }
-        
-        println!("\nNext scan in 10 seconds...");
+
+        println!("Next scan in 10 seconds...");
         Timer::after(Duration::from_secs(10)).await;
     }
 }
@@ -120,19 +115,17 @@ async fn wifi_scan_task(wifi_ctrl: &'static mut WifiController<'static>) {
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
     init_heap();
-    
+
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    
-    println!("=========================================");
-    println!("   RustRTOS WiFi Scan Example");
-    println!("   ESP32-S3 @ 240MHz");
-    println!("=========================================");
-    
-    // 初始化时钟 (xtensa 平台只需要 timer)
+
+    println!("RustRTOS WiFi Scan Example");
+    println!("ESP32-S3 @ 240MHz");
+
+    // 初始化时钟(xtensa平台只需要timer)
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
-    
-    // 初始化 esp-radio 控制器
+
+    // 初始化esp-radio控制器
     let radio_controller = match esp_radio::init() {
         Ok(ctrl) => {
             println!("esp-radio initialized successfully");
@@ -143,12 +136,12 @@ async fn main(spawner: Spawner) {
             loop { core::hint::spin_loop(); }
         }
     };
-    
-    // 先存储 radio_controller 到静态区，获取 'static 引用
+
+    // 先存储radio_controller到静态区，获取 'static引用
     static RADIO_CONTROLLER: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
     let radio_ref = RADIO_CONTROLLER.init(radio_controller);
-    
-    // 创建 WiFi 控制器 (使用 'static 引用)
+
+    // 创建WiFi控制器(使用 'static引用)
     let (controller, _interfaces) = match esp_radio::wifi::new(
         radio_ref,
         peripherals.WIFI,
@@ -163,13 +156,13 @@ async fn main(spawner: Spawner) {
             loop { core::hint::spin_loop(); }
         }
     };
-    
+
     static WIFI_CONTROLLER: StaticCell<WifiController<'static>> = StaticCell::new();
     let wifi_ctrl = WIFI_CONTROLLER.init(controller);
-    
-    println!("Starting WiFi scan task...\n");
+
+    println!("Starting WiFi scan task...");
     spawner.spawn(wifi_scan_task(wifi_ctrl)).ok();
-    
+
     loop {
         Timer::after(Duration::from_secs(60)).await;
     }
