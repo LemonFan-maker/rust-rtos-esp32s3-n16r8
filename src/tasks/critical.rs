@@ -6,7 +6,7 @@
 //! - 安全关键操作
 //! 所有关键函数使用 #[esp_hal::ram]宏放入IRAM，避免Flash访问延迟
 
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::ram;
 use portable_atomic::{AtomicU32, AtomicU64, Ordering};
 
@@ -26,27 +26,31 @@ pub static SENSOR_READY: CriticalSignal<u32> = CriticalSignal::new();
 // 高优先级任务: 传感器采样
 /// 关键传感器采样任务
 /// 运行在Priority3中断执行器上，每100μs采样一次
-/// 目标延迟: < 1μs响应时间
+/// 节拍用Ticker按绝对期限对齐: 处理耗时从等待中扣除，采样间隔不随负载漂移
 #[embassy_executor::task]
 #[ram] // 关键: 放入IRAM避免Flash访问延迟
 pub async fn critical_sensor_task() {
     log_info!("Critical sensor task started (Priority3, IRAM)");
 
+    const TARGET_INTERVAL_US: u64 = 100; // 目标采样周期
+
+    let mut ticker = Ticker::every(Duration::from_micros(TARGET_INTERVAL_US));
     let mut last_time = Instant::now();
     let mut max_jitter: u64 = 0;
 
     loop {
+        ticker.next().await;
+
         // 记录实际采样间隔(用于性能分析)
         let now = Instant::now();
         let elapsed = now.duration_since(last_time).as_micros();
         last_time = now;
 
-        // 计算抖动(jitter)
-        let target_interval: u64 = 100; // 100μs
-        let jitter = if elapsed > target_interval {
-            elapsed - target_interval
+        // 计算抖动(jitter): 实际间隔偏离目标周期的幅度
+        let jitter = if elapsed > TARGET_INTERVAL_US {
+            elapsed - TARGET_INTERVAL_US
         } else {
-            target_interval - elapsed
+            TARGET_INTERVAL_US - elapsed
         };
 
         if jitter > max_jitter {
@@ -68,14 +72,16 @@ pub async fn critical_sensor_task() {
             SENSOR_READY.signal(value);
         }
 
-        // 高精度延时: 100μs
-        Timer::after(Duration::from_micros(100)).await;
+        // 超期保护: 落后超过一个周期时，Ticker会背靠背补发错过的节拍，
+        // 补发样本的间隔远小于100μs，破坏定频语义; 这里丢弃积压、从当前时刻重新对齐
+        if elapsed > 2 * TARGET_INTERVAL_US {
+            ticker.reset();
+        }
     }
 }
 
 /// 模拟传感器读取
 /// 实际使用时替换为真实ADC/I2C/SPI读取
-#[inline(always)]
 #[ram]
 fn simulate_sensor_read() -> u32 {
     // 简单的伪随机数生成(LCG)
@@ -110,22 +116,19 @@ pub async fn wait_sensor_data() -> u32 {
 
 // 性能关键: 中断处理辅助函数
 
-/// 快速位操作 - 强制内联
-#[inline(always)]
+/// 快速位操作 - 放入IRAM(#[ram]要求不可内联，与inline(always)互斥)
 #[ram]
 pub fn fast_bit_set(value: &mut u32, bit: u8) {
     *value |= 1 << bit;
 }
 
-/// 快速位清除 - 强制内联
-#[inline(always)]
+/// 快速位清除 - 放入IRAM(同上)
 #[ram]
 pub fn fast_bit_clear(value: &mut u32, bit: u8) {
     *value &= !(1 << bit);
 }
 
-/// 快速位测试 - 强制内联
-#[inline(always)]
+/// 快速位测试 - 放入IRAM(同上)
 #[ram]
 pub fn fast_bit_test(value: u32, bit: u8) -> bool {
     (value & (1 << bit)) != 0
