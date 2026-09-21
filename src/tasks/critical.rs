@@ -64,7 +64,7 @@ pub async fn critical_sensor_task() {
         let count = SAMPLE_COUNT.fetch_add(1, Ordering::Relaxed);
 
         // 每10000次采样发送一次信号给低优先级任务
-        if count % 10000 == 0 {
+        if (count + 1) % 10000 == 0 {
             SENSOR_READY.signal(value);
         }
 
