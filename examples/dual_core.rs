@@ -1,11 +1,3 @@
-//! 双核示例 - SMP支持演示
-//! 演示ESP32-S3双核功能:
-//! - Core1启动
-//! - 跨核通信
-//! - IPC原语使用
-//! 运行
-//! cargo run --example dual_core --features dev --target xtensa-esp32s3-none-elf
-
 #![no_std]
 #![no_main]
 
@@ -16,7 +8,6 @@ use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use portable_atomic::{AtomicU32, Ordering};
 
-// 条件编译日志
 #[cfg(feature = "dev")]
 use esp_println::println;
 
@@ -25,7 +16,6 @@ macro_rules! println {
     ($($arg:tt)*) => {};
 }
 
-// Panic Handler
 #[cfg(feature = "dev")]
 use esp_backtrace as _;
 
@@ -35,11 +25,9 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-// 共享计数器
 static CORE0_COUNTER: AtomicU32 = AtomicU32::new(0);
 static CORE1_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Core0工作任务
 #[embassy_executor::task]
 async fn core0_task() {
     println!("Core0 task started");
@@ -50,7 +38,6 @@ async fn core0_task() {
     }
 }
 
-/// 监控任务
 #[embassy_executor::task]
 async fn monitor_task() {
     println!("Monitor task started");
@@ -63,23 +50,23 @@ async fn monitor_task() {
 
         println!("Core Status");
         println!("Core0 counter: {}", c0);
+        #[cfg(feature = "multicore")]
+        println!("Core1 counter: {} (real Core1 task)", c1);
+        #[cfg(not(feature = "multicore"))]
         println!("Core1 counter: {} (simulated)", c1);
         println!("Total: {}", c0 + c1);
     }
 }
 
-/// IPC演示任务
 #[embassy_executor::task]
 async fn ipc_demo_task() {
     println!("IPC demo task started");
 
-    // 使用IPC通道进行跨核通信演示
     use rustrtos::tasks::multicore::{IpcChannel, IpcSignal};
 
     static IPC_CHANNEL: IpcChannel<u32, 8> = IpcChannel::new();
     static IPC_SIGNAL: IpcSignal = IpcSignal::new();
 
-    // 发送数据
     for i in 0..5 {
         if IPC_CHANNEL.try_send(i).is_ok() {
             println!("Sent {} to IPC channel", i);
@@ -87,13 +74,11 @@ async fn ipc_demo_task() {
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    // 接收数据
     println!("Receiving from IPC channel:");
     while let Some(value) = IPC_CHANNEL.try_recv() {
         println!("Received: {}", value);
     }
 
-    // 测试信号
     println!("Testing IPC signal:");
     IPC_SIGNAL.signal();
     println!("Signal sent");
@@ -110,17 +95,52 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     println!("Dual Core Example");
-    println!("Note: Full dual-core requires hardware support");
+    #[cfg(feature = "multicore")]
+    println!("Mode: real dual-core, esp-rtos scheduler on Core1");
+    #[cfg(not(feature = "multicore"))]
+    println!("Mode: Core1 simulated on Core0 (enable 'multicore' feature for real dual-core)");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    // 启动任务
     spawner.spawn(core0_task()).ok();
     spawner.spawn(monitor_task()).ok();
     spawner.spawn(ipc_demo_task()).ok();
 
-    // 模拟Core1活动
+    #[cfg(feature = "multicore")]
+    {
+        use esp_hal::interrupt::software::SoftwareInterruptControl;
+        use esp_hal::system::Stack;
+        use rustrtos::tasks::multicore::Core1;
+        use static_cell::StaticCell;
+
+        let sw_ints = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+        static CORE1_STACK: StaticCell<Stack<8192>> = StaticCell::new();
+        let core1_stack = CORE1_STACK.init(Stack::new());
+
+        Core1::start_with_rtos(
+            peripherals.CPU_CTRL,
+            sw_ints.software_interrupt0,
+            sw_ints.software_interrupt1,
+            core1_stack,
+            || {
+                println!("Core1 entry running on APP_CPU");
+                let handle = esp_rtos::CurrentThreadHandle::get();
+                loop {
+                    CORE1_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    handle.delay(esp_hal::time::Duration::from_millis(200));
+                }
+            },
+        );
+        Core1::wait_ready();
+        println!("Core1 scheduler ready");
+
+        loop {
+            Timer::after(Duration::from_secs(10)).await;
+        }
+    }
+
+    #[cfg(not(feature = "multicore"))]
     loop {
         CORE1_COUNTER.fetch_add(1, Ordering::Relaxed);
         Timer::after(Duration::from_millis(200)).await;
