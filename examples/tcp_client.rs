@@ -1,25 +1,34 @@
-//! TCP客户端示例
-//! 演示如何使用TCP客户端连接到服务器并发送HTTP请求。
-//! 配置
-//! 修改WIFI_SSID, WIFI_PASSWORD和目标服务器地址。
-//! 运行
-//! cargo run --example tcp_client --features network,dev --target xtensa-esp32s3-none-elf
-
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
-// 使用esp_alloc作为全局分配器
 use esp_alloc as _;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 use core::mem::MaybeUninit;
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
+use esp_hal::timer::timg::TimerGroup;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use static_cell::StaticCell;
 
-/// 初始化堆分配器(esp-radio需要)
+use rustrtos::net::config::WIFI_EVENT_QUEUE_SIZE;
+use rustrtos::net::tcp::{NetworkStack, StackConfig, TcpClient};
+use rustrtos::net::wifi::{WifiController, WifiEvent, WifiMode};
+
+const WIFI_SSID: &str = "YourSSID";
+const WIFI_PASSWORD: &str = "YourPassword";
+
+const SERVER_HOST: &str = "baidu.com";
+const SERVER_PORT: u16 = 80;
+
+const NET_SOCKET_SLOTS: usize = 6;
+
 fn init_heap() {
-    const HEAP_SIZE: usize = 72 * 1024; // 72KB for WiFi + TCP
+    const HEAP_SIZE: usize = 72 * 1024;
     static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
 
     unsafe {
@@ -31,29 +40,6 @@ fn init_heap() {
     }
 }
 
-use core::net::SocketAddrV4;
-use core::str::FromStr;
-use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
-use esp_hal::timer::timg::TimerGroup;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_sync::signal::Signal;
-use static_cell::StaticCell;
-
-use rustrtos::net::wifi::{WifiController, WifiEvent, WifiMode};
-use rustrtos::net::tcp::{TcpClient, NetworkStack, StackConfig, Ipv4Address};
-use rustrtos::net::config::WIFI_EVENT_QUEUE_SIZE;
-
-// 配置
-const WIFI_SSID: &str = "YourSSID";
-const WIFI_PASSWORD: &str = "YourPassword";
-
-// 目标HTTP服务器(httpbin.org或本地服务器)
-const SERVER_IP: [u8; 4] = [93, 184, 216, 34]; // example.com
-const SERVER_PORT: u16 = 80;
-
-// 条件编译日志
 #[cfg(feature = "dev")]
 use esp_println::println;
 
@@ -62,7 +48,6 @@ macro_rules! println {
     ($($arg:tt)*) => {};
 }
 
-// Panic Handler
 #[cfg(feature = "dev")]
 use esp_backtrace as _;
 
@@ -72,33 +57,56 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-// 静态分配
 static WIFI_EVENT_CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, WifiEvent, WIFI_EVENT_QUEUE_SIZE>> = StaticCell::new();
-static WIFI_CONNECTED_SIGNAL: StaticCell<Signal<CriticalSectionRawMutex, bool>> = StaticCell::new();
+static NET_RESOURCES: StaticCell<embassy_net::StackResources<NET_SOCKET_SLOTS>> = StaticCell::new();
+static TCP_RX_BUF: StaticCell<[u8; 2048]> = StaticCell::new();
+static TCP_TX_BUF: StaticCell<[u8; 2048]> = StaticCell::new();
 
-/// HTTP GET请求
-const HTTP_REQUEST: &[u8] = b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n";
+const HTTP_REQUEST: &[u8] = b"GET / HTTP/1.1\r\nHost: baidu.com\r\nConnection: close\r\n\r\n";
 
-/// TCP客户端任务
+#[embassy_executor::task]
+async fn net_task(
+    mut runner: embassy_net::Runner<'static, esp_radio::wifi::WifiDevice<'static>>,
+) -> ! {
+    runner.run().await
+}
+
+// net_task(runner) 一旦 spawn 就永久存活并持有 embassy-net 的 iface;
+// 若本任务提前 return,局部 wifi_ctrl 被 drop 触发 esp-radio wifi_deinit,
+// runner 后续 dispatch 会访问已释放驱动(实测 LoadProhibited@esp_wifi_internal_tx)。
+// 因此 spawn 之后的所有失败出口必须 park 而非 return。
+async fn park_after_spawn() -> ! {
+    println!("TCP client demo halted (keeping WiFi/net_task alive).");
+    loop {
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(60)).await;
+    }
+}
+
 #[embassy_executor::task]
 async fn tcp_client_task(
+    spawner: Spawner,
+    radio: &'static esp_radio::Controller<'static>,
+    wifi_peripheral: esp_hal::peripherals::WIFI<'static>,
     event_channel: &'static Channel<CriticalSectionRawMutex, WifiEvent, WIFI_EVENT_QUEUE_SIZE>,
-    connected_signal: &'static Signal<CriticalSectionRawMutex, bool>,
 ) {
     println!("TCP client task started");
 
-    // 1. WiFi连接
-    let mut wifi_ctrl = WifiController::new(event_channel, connected_signal);
-
-    println!("Initializing WiFi controller...");
-    if let Err(e) = wifi_ctrl.init().await {
-        println!("WiFi init failed: {:?}", e);
-        return;
-    }
+    let mut wifi_ctrl = match WifiController::new(radio, wifi_peripheral, event_channel) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("WiFi controller init failed: {:?}", e);
+            return;
+        }
+    };
 
     if let Err(e) = wifi_ctrl.set_mode(WifiMode::Sta).await {
         println!("Set mode failed: {:?}", e);
         return;
+    }
+
+    match wifi_ctrl.scan().await {
+        Ok(aps) => println!("Scan found {} networks", aps.len()),
+        Err(e) => println!("Scan failed: {:?}", e),
     }
 
     println!("Connecting to WiFi '{}'...", WIFI_SSID);
@@ -107,57 +115,81 @@ async fn tcp_client_task(
         return;
     }
 
-    println!("Waiting for IP...");
-    let local_ip = match wifi_ctrl.wait_for_ip().await {
-        Ok(ip) => {
-            println!("Got IP: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
-            ip
-        }
-        Err(e) => {
-            println!("Failed to get IP: {:?}", e);
+    let mac = wifi_ctrl.mac_address();
+    println!(
+        "WiFi connected. STA MAC {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    );
+    if let Ok(rssi) = wifi_ctrl.rssi() {
+        println!("RSSI: {} dBm", rssi);
+    }
+
+    let device = match wifi_ctrl.take_sta() {
+        Some(d) => d,
+        None => {
+            println!("STA interface already taken");
             return;
         }
     };
 
-    // 2.初始化网络栈
-    println!("Initializing network stack...");
-    let mut stack = NetworkStack::new(StackConfig::default());
-
-    if let Err(e) = stack.init().await {
-        println!("Stack init failed: {:?}", e);
+    let seed = esp_hal::rng::Rng::new().random() as u64;
+    let (stack, runner) = NetworkStack::new(
+        device,
+        StackConfig::default(),
+        NET_RESOURCES.init(embassy_net::StackResources::new()),
+        seed,
+    );
+    if spawner.spawn(net_task(runner)).is_err() {
+        println!("Failed to spawn net_task");
         return;
     }
 
-    if let Err(e) = stack.start_dhcp().await {
-        println!("DHCP failed: {:?}", e);
-        return;
+    println!("Waiting for IP (DHCP)...");
+    let ip_info = match stack.wait_for_ip().await {
+        Ok(info) => info,
+        Err(e) => {
+            println!("Failed to get IP: {:?}", e);
+            park_after_spawn().await;
+        }
+    };
+    println!("Got IP: {}", ip_info.ip);
+    println!("Netmask: {}", ip_info.netmask);
+    if let Some(gw) = ip_info.gateway {
+        println!("Gateway: {}", gw);
+        wifi_ctrl.set_ip_address(ip_info.ip.octets(), gw.octets());
+    }
+    for dns in &ip_info.dns_servers {
+        println!("DNS: {}", dns);
     }
 
-    println!("Network stack ready");
+    while let Some(event) = wifi_ctrl.try_recv_event() {
+        println!("WiFi event: {:?}", event);
+    }
 
-    // 3. TCP连接
-    let server_ip = Ipv4Address::new(SERVER_IP[0], SERVER_IP[1], SERVER_IP[2], SERVER_IP[3]);
-    let server_addr = SocketAddrV4::new(server_ip.to_std(), SERVER_PORT);
-
-    println!("Connecting to {}.{}.{}.{}:{}...",
-        SERVER_IP[0], SERVER_IP[1], SERVER_IP[2], SERVER_IP[3], SERVER_PORT);
-
-    let mut tcp_client = TcpClient::new();
-
-    match tcp_client.connect(server_addr).await {
-        Ok(_) => {
-            println!("TCP connected!");
-            println!("Local port: {}", tcp_client.local_port());
+    let server_ip = match stack.dns_resolve(SERVER_HOST).await {
+        Ok(ip) => {
+            println!("DNS {} -> {:?}", SERVER_HOST, ip.octets());
+            ip
         }
         Err(e) => {
-            println!("TCP connect failed: {:?}", e);
-            return;
+            println!("DNS resolve failed: {:?}", e);
+            park_after_spawn().await;
         }
-    }
+    };
 
-    // 4.发送HTTP请求
+    println!("Connecting to {}:{}...", SERVER_HOST, SERVER_PORT);
+
+    let rx_buf = TCP_RX_BUF.init([0u8; 2048]);
+    let tx_buf = TCP_TX_BUF.init([0u8; 2048]);
+    let mut tcp_client = TcpClient::new(stack.stack(), rx_buf, tx_buf);
+
+    if let Err(e) = tcp_client.connect_to(server_ip, SERVER_PORT).await {
+        println!("TCP connect failed: {:?}", e);
+        park_after_spawn().await;
+    }
+    println!("TCP connected! Local port: {}", tcp_client.local_port());
+
     println!("Sending HTTP request...");
-    // 打印请求(安全地处理非UTF8)
     if let Ok(req_str) = core::str::from_utf8(HTTP_REQUEST) {
         for line in req_str.lines() {
             println!("> {}", line);
@@ -168,26 +200,23 @@ async fn tcp_client_task(
         Ok(sent) => println!("Sent {} bytes", sent),
         Err(e) => {
             println!("Send failed: {:?}", e);
-            return;
+            park_after_spawn().await;
         }
     }
 
-    // 5.接收响应
     println!("Waiting for response...");
-
-    let mut rx_buf = [0u8; 1024];
+    let mut rx_slice = [0u8; 1024];
     let mut total_received = 0usize;
 
-    // 简单的接收循环(实际实现需要更复杂的逻辑)
-    for _ in 0..10 {
-        Timer::after(Duration::from_millis(500)).await;
-
-        match tcp_client.read(&mut rx_buf).await {
-            Ok(len) if len > 0 => {
+    loop {
+        match tcp_client.read_timeout(&mut rx_slice, Duration::from_secs(5)).await {
+            Ok(0) => {
+                break;
+            }
+            Ok(len) => {
                 total_received += len;
 
-                // 打印接收到的数据(作为字符串)
-                if let Ok(response) = core::str::from_utf8(&rx_buf[..len]) {
+                if let Ok(response) = core::str::from_utf8(&rx_slice[..len]) {
                     for line in response.lines().take(10) {
                         println!("< {}", line);
                     }
@@ -196,10 +225,7 @@ async fn tcp_client_task(
                     }
                 }
             }
-            Ok(_) => {
-                // 没有更多数据
-                break;
-            }
+            Err(rustrtos::net::tcp::NetworkError::Timeout) => break,
             Err(e) => {
                 println!("Read error: {:?}", e);
                 break;
@@ -209,7 +235,6 @@ async fn tcp_client_task(
 
     println!("Total received: {} bytes", total_received);
 
-    // 6.关闭连接
     println!("Closing connection...");
     if let Err(e) = tcp_client.close().await {
         println!("Close error: {:?}", e);
@@ -217,7 +242,6 @@ async fn tcp_client_task(
 
     println!("TCP Client Demo Complete!");
 
-    // 保持任务运行
     loop {
         Timer::after(Duration::from_secs(60)).await;
     }
@@ -225,7 +249,6 @@ async fn tcp_client_task(
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
-    // 初始化堆分配器(esp-radio需要)
     init_heap();
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -233,30 +256,30 @@ async fn main(spawner: Spawner) {
     println!("RustRTOS TCP Client Example");
     println!("ESP32-S3 @ 240MHz");
 
-    // 初始化esp-rtos时间驱动
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    // 初始化esp-radio (WiFi/BLE驱动)
-    match esp_radio::init() {
-        Ok(_controller) => println!("esp-radio initialized successfully"),
+    static RADIO_CONTROLLER: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
+    let radio = match esp_radio::init() {
+        Ok(ctrl) => {
+            println!("esp-radio initialized successfully");
+            RADIO_CONTROLLER.init(ctrl)
+        }
         Err(e) => {
             println!("esp-radio init failed: {:?}", e);
             loop { core::hint::spin_loop(); }
         }
-    }
+    };
 
-    // 初始化静态通道
     let event_channel = WIFI_EVENT_CHANNEL.init(Channel::new());
-    let connected_signal = WIFI_CONNECTED_SIGNAL.init(Signal::new());
 
-    // 启动TCP客户端任务
     spawner.spawn(tcp_client_task(
+        spawner,
+        radio,
+        peripherals.WIFI,
         event_channel,
-        connected_signal,
     )).ok();
 
-    // 主循环
     loop {
         Timer::after(Duration::from_secs(60)).await;
     }

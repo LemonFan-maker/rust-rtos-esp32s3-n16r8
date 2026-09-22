@@ -1,28 +1,39 @@
-//! 网络性能基准测试
-//! 测试WiFi和BLE的性能指标:
-//! - WiFi连接建立时间
-//! - TCP吞吐量
-//! - UDP吞吐量
-//! - BLE广播延迟
-//! - BLE通知延迟
-//! 运行
-//! cargo run --example benchmark_network --features network,dev --target xtensa-esp32s3-none-elf --release
-
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
-// 使用esp_alloc作为全局分配器
 use esp_alloc as _;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 use core::mem::MaybeUninit;
+use core::net::{Ipv4Addr, SocketAddrV4};
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Instant, Timer};
+use esp_hal::timer::timg::TimerGroup;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use static_cell::StaticCell;
+use portable_atomic::{AtomicU32, AtomicU64, Ordering};
 
-/// 初始化堆分配器
+use rustrtos::net::config::WIFI_EVENT_QUEUE_SIZE;
+use rustrtos::net::tcp::{NetworkStack, StackConfig, TcpClient};
+use rustrtos::net::wifi::{WifiController, WifiEvent, WifiMode};
+
+const WIFI_SSID: &str = "YourSSID";
+const WIFI_PASSWORD: &str = "YourPassword";
+
+const SERVER_IP: [u8; 4] = [192, 168, 1, 10];
+const SERVER_PORT: u16 = 5001;
+
+const TCP_TEST_DURATION_SECS: u64 = 10;
+const TCP_BUFFER_SIZE: usize = 1024;
+
+const NET_SOCKET_SLOTS: usize = 6;
+
 fn init_heap() {
-    const HEAP_SIZE: usize = 96 * 1024; // 96KB for benchmark
+    const HEAP_SIZE: usize = 72 * 1024;
     static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
 
     unsafe {
@@ -34,35 +45,6 @@ fn init_heap() {
     }
 }
 
-use core::net::SocketAddrV4;
-use embassy_executor::Spawner;
-use embassy_time::{Duration, Instant, Timer};
-use esp_hal::timer::timg::TimerGroup;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_sync::signal::Signal;
-use static_cell::StaticCell;
-use portable_atomic::{AtomicU32, AtomicU64, Ordering};
-
-use rustrtos::net::wifi::{WifiController, WifiEvent, WifiMode};
-use rustrtos::net::tcp::{TcpClient, NetworkStack, StackConfig, Ipv4Address};
-use rustrtos::net::config::WIFI_EVENT_QUEUE_SIZE;
-
-// 配置
-const WIFI_SSID: &str = "SSID";
-const WIFI_PASSWORD: &str = "PASSWD";
-
-// iperf服务器地址(需要在局域网内运行iperf -s)
-const IPERF_SERVER_IP: [u8; 4] = [192, 168, 1, 100];
-const IPERF_SERVER_PORT: u16 = 5001;
-
-// 测试参数
-const TCP_TEST_DURATION_SECS: u64 = 10;
-const UDP_TEST_DURATION_SECS: u64 = 10;
-const TCP_BUFFER_SIZE: usize = 1024;
-const UDP_BUFFER_SIZE: usize = 1472; // MTU - IP/UDP headers
-
-// 条件编译日志
 #[cfg(feature = "dev")]
 use esp_println::println;
 
@@ -71,7 +53,6 @@ macro_rules! println {
     ($($arg:tt)*) => {};
 }
 
-// Panic Handler
 #[cfg(feature = "dev")]
 use esp_backtrace as _;
 
@@ -81,34 +62,26 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-// 静态分配
 static WIFI_EVENT_CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, WifiEvent, WIFI_EVENT_QUEUE_SIZE>> = StaticCell::new();
-static WIFI_CONNECTED_SIGNAL: StaticCell<Signal<CriticalSectionRawMutex, bool>> = StaticCell::new();
+static NET_RESOURCES: StaticCell<embassy_net::StackResources<NET_SOCKET_SLOTS>> = StaticCell::new();
+static TCP_RX_BUF: StaticCell<[u8; TCP_BUFFER_SIZE]> = StaticCell::new();
+static TCP_TX_BUF: StaticCell<[u8; TCP_BUFFER_SIZE]> = StaticCell::new();
+static TX_PATTERN: [u8; TCP_BUFFER_SIZE] = [0xAA_u8; TCP_BUFFER_SIZE];
 
-// 统计数据
 static TX_BYTES: AtomicU64 = AtomicU64::new(0);
 static RX_BYTES: AtomicU64 = AtomicU64::new(0);
 static TX_PACKETS: AtomicU32 = AtomicU32::new(0);
 static RX_PACKETS: AtomicU32 = AtomicU32::new(0);
 
-/// 基准测试结果
 #[derive(Debug, Clone, Default)]
 struct BenchmarkResult {
-    /// 测试名称
     name: &'static str,
-    /// 持续时间(微秒)
     duration_us: u64,
-    /// 发送字节数
     tx_bytes: u64,
-    /// 接收字节数
     rx_bytes: u64,
-    /// 吞吐量(Kbps)
     throughput_kbps: u32,
-    /// 平均延迟(微秒)
     avg_latency_us: u32,
-    /// 最小延迟(微秒)
     min_latency_us: u32,
-    /// 最大延迟(微秒)
     max_latency_us: u32,
 }
 
@@ -129,72 +102,24 @@ impl BenchmarkResult {
     }
 }
 
-/// WiFi连接时间测试
-async fn benchmark_wifi_connect(
-    wifi_ctrl: &mut WifiController<'_>,
-) -> BenchmarkResult {
-    println!("[Benchmark] WiFi Connection Time");
-    println!("Connecting to '{}'...", WIFI_SSID);
-
-    // 确保断开
-    let _ = wifi_ctrl.disconnect().await;
-    Timer::after(Duration::from_millis(500)).await;
-
-    let start = Instant::now();
-
-    let connect_result = wifi_ctrl.connect(WIFI_SSID, WIFI_PASSWORD).await;
-
-    let connect_time = start.elapsed();
-
-    if connect_result.is_err() {
-        println!("Connection failed!");
-        return BenchmarkResult {
-            name: "WiFi Connect",
-            duration_us: connect_time.as_micros(),
-            ..Default::default()
-        };
-    }
-
-    // 等待IP
-    let ip_start = Instant::now();
-    let ip_result = wifi_ctrl.wait_for_ip().await;
-    let ip_time = ip_start.elapsed();
-
-    let total_time = start.elapsed();
-
-    if let Ok(ip) = ip_result {
-        println!("Connected! IP: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
-    }
-
-    BenchmarkResult {
-        name: "WiFi Connect",
-        duration_us: total_time.as_micros(),
-        avg_latency_us: connect_time.as_micros() as u32,
-        min_latency_us: connect_time.as_micros() as u32,
-        max_latency_us: (connect_time.as_micros() + ip_time.as_micros()) as u32,
-        ..Default::default()
-    }
+fn server_addr() -> SocketAddrV4 {
+    SocketAddrV4::new(
+        Ipv4Addr::new(SERVER_IP[0], SERVER_IP[1], SERVER_IP[2], SERVER_IP[3]),
+        SERVER_PORT,
+    )
 }
 
-/// TCP吞吐量测试(发送)
-async fn benchmark_tcp_throughput_tx(
-    _stack: &NetworkStack<'_>,
+async fn benchmark_tcp_throughput_tx<'a>(
+    stack: embassy_net::Stack<'a>,
+    rx_buf: &'a mut [u8],
+    tx_buf: &'a mut [u8],
 ) -> BenchmarkResult {
     println!("[Benchmark] TCP TX Throughput");
-    println!("Connecting to {}:{}...",
-        format_args!("{}.{}.{}.{}", IPERF_SERVER_IP[0], IPERF_SERVER_IP[1],
-            IPERF_SERVER_IP[2], IPERF_SERVER_IP[3]),
-        IPERF_SERVER_PORT);
+    println!("Connecting to {}...", server_addr());
 
-    let server_ip = Ipv4Address::new(
-        IPERF_SERVER_IP[0], IPERF_SERVER_IP[1],
-        IPERF_SERVER_IP[2], IPERF_SERVER_IP[3]
-    );
-    let server_addr = SocketAddrV4::new(server_ip.to_std(), IPERF_SERVER_PORT);
+    let mut tcp_client = TcpClient::new(stack, rx_buf, tx_buf);
 
-    let mut tcp_client = TcpClient::new();
-
-    if tcp_client.connect(server_addr).await.is_err() {
+    if tcp_client.connect(server_addr()).await.is_err() {
         println!("TCP connect failed!");
         return BenchmarkResult {
             name: "TCP TX Throughput",
@@ -204,9 +129,6 @@ async fn benchmark_tcp_throughput_tx(
 
     println!("Connected, starting TX test for {} seconds...", TCP_TEST_DURATION_SECS);
 
-    // 准备发送缓冲区
-    let tx_buffer = [0xAA_u8; TCP_BUFFER_SIZE];
-
     TX_BYTES.store(0, Ordering::Relaxed);
     TX_PACKETS.store(0, Ordering::Relaxed);
 
@@ -214,7 +136,7 @@ async fn benchmark_tcp_throughput_tx(
     let deadline = Duration::from_secs(TCP_TEST_DURATION_SECS);
 
     while start.elapsed() < deadline {
-        match tcp_client.write(&tx_buffer).await {
+        match tcp_client.write(&TX_PATTERN).await {
             Ok(sent) => {
                 TX_BYTES.fetch_add(sent as u64, Ordering::Relaxed);
                 TX_PACKETS.fetch_add(1, Ordering::Relaxed);
@@ -227,7 +149,6 @@ async fn benchmark_tcp_throughput_tx(
     let total_bytes = TX_BYTES.load(Ordering::Relaxed);
     let total_packets = TX_PACKETS.load(Ordering::Relaxed);
 
-    // 计算吞吐量(Kbps)
     let throughput_kbps = if duration.as_micros() > 0 {
         ((total_bytes * 8 * 1_000_000) / duration.as_micros()) as u32 / 1000
     } else {
@@ -235,6 +156,7 @@ async fn benchmark_tcp_throughput_tx(
     };
 
     let _ = tcp_client.close().await;
+    drop(tcp_client);
 
     println!("TX Test complete:");
     println!("Sent: {} KB in {} packets", total_bytes / 1024, total_packets);
@@ -248,24 +170,17 @@ async fn benchmark_tcp_throughput_tx(
     }
 }
 
-/// TCP吞吐量测试(接收)
-async fn benchmark_tcp_throughput_rx(
-    _stack: &NetworkStack<'_>,
+async fn benchmark_tcp_throughput_rx<'a>(
+    stack: embassy_net::Stack<'a>,
+    rx_buf: &'a mut [u8],
+    tx_buf: &'a mut [u8],
 ) -> BenchmarkResult {
     println!("[Benchmark] TCP RX Throughput");
     println!("Note: Requires iperf client sending data to this device");
 
-    // 此测试需要外部iperf客户端向设备发送数据
+    let mut tcp_client = TcpClient::new(stack, rx_buf, tx_buf);
 
-    let server_ip = Ipv4Address::new(
-        IPERF_SERVER_IP[0], IPERF_SERVER_IP[1],
-        IPERF_SERVER_IP[2], IPERF_SERVER_IP[3]
-    );
-    let server_addr = SocketAddrV4::new(server_ip.to_std(), IPERF_SERVER_PORT);
-
-    let mut tcp_client = TcpClient::new();
-
-    if tcp_client.connect(server_addr).await.is_err() {
+    if tcp_client.connect(server_addr()).await.is_err() {
         println!("TCP connect failed!");
         return BenchmarkResult {
             name: "TCP RX Throughput",
@@ -275,24 +190,21 @@ async fn benchmark_tcp_throughput_rx(
 
     println!("Connected, waiting for data for {} seconds...", TCP_TEST_DURATION_SECS);
 
-    let mut rx_buffer = [0u8; TCP_BUFFER_SIZE];
-
     RX_BYTES.store(0, Ordering::Relaxed);
     RX_PACKETS.store(0, Ordering::Relaxed);
 
     let start = Instant::now();
     let deadline = Duration::from_secs(TCP_TEST_DURATION_SECS);
 
+    let mut sink = [0u8; 512];
     while start.elapsed() < deadline {
-        match tcp_client.read(&mut rx_buffer).await {
+        match tcp_client.read_timeout(&mut sink, Duration::from_millis(500)).await {
             Ok(received) if received > 0 => {
                 RX_BYTES.fetch_add(received as u64, Ordering::Relaxed);
                 RX_PACKETS.fetch_add(1, Ordering::Relaxed);
             }
-            _ => {
-                // 短暂等待后重试
-                Timer::after(Duration::from_millis(10)).await;
-            }
+            Ok(_) => break,
+            Err(_) => continue,
         }
     }
 
@@ -307,6 +219,7 @@ async fn benchmark_tcp_throughput_rx(
     };
 
     let _ = tcp_client.close().await;
+    drop(tcp_client);
 
     println!("RX Test complete:");
     println!("Received: {} KB in {} packets", total_bytes / 1024, total_packets);
@@ -320,21 +233,16 @@ async fn benchmark_tcp_throughput_rx(
     }
 }
 
-/// TCP延迟测试(Ping-Pong)
-async fn benchmark_tcp_latency(
-    _stack: &NetworkStack<'_>,
+async fn benchmark_tcp_latency<'a>(
+    stack: embassy_net::Stack<'a>,
+    rx_buf: &'a mut [u8],
+    tx_buf: &'a mut [u8],
 ) -> BenchmarkResult {
     println!("[Benchmark] TCP Latency (Echo)");
 
-    let server_ip = Ipv4Address::new(
-        IPERF_SERVER_IP[0], IPERF_SERVER_IP[1],
-        IPERF_SERVER_IP[2], IPERF_SERVER_IP[3]
-    );
-    let server_addr = SocketAddrV4::new(server_ip.to_std(), IPERF_SERVER_PORT);
+    let mut tcp_client = TcpClient::new(stack, rx_buf, tx_buf);
 
-    let mut tcp_client = TcpClient::new();
-
-    if tcp_client.connect(server_addr).await.is_err() {
+    if tcp_client.connect(server_addr()).await.is_err() {
         println!("TCP connect failed!");
         return BenchmarkResult {
             name: "TCP Latency",
@@ -358,14 +266,30 @@ async fn benchmark_tcp_latency(
     for i in 0..PING_COUNT {
         let start = Instant::now();
 
-        // 发送
         if tcp_client.write(&ping_data).await.is_err() {
-            continue;
+            break;
         }
 
-        // 接收
-        if tcp_client.read(&mut pong_data).await.is_err() {
-            continue;
+        let mut got = 0usize;
+        let mut ok = true;
+        while got < PING_SIZE {
+            match tcp_client
+                .read_timeout(&mut pong_data[got..], Duration::from_secs(1))
+                .await
+            {
+                Ok(0) => {
+                    ok = false;
+                    break;
+                }
+                Ok(n) => got += n,
+                Err(_) => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if !ok {
+            break;
         }
 
         let latency_us = start.elapsed().as_micros() as u32;
@@ -381,6 +305,7 @@ async fn benchmark_tcp_latency(
     }
 
     let _ = tcp_client.close().await;
+    drop(tcp_client);
 
     let avg_latency_us = if successful_pings > 0 {
         (total_latency_us / successful_pings as u64) as u32
@@ -400,102 +325,149 @@ async fn benchmark_tcp_latency(
     }
 }
 
-/// 网络基准测试主任务
+#[embassy_executor::task]
+async fn net_task(
+    mut runner: embassy_net::Runner<'static, esp_radio::wifi::WifiDevice<'static>>,
+) -> ! {
+    runner.run().await
+}
+
 #[embassy_executor::task]
 async fn benchmark_task(
+    spawner: Spawner,
+    radio: &'static esp_radio::Controller<'static>,
+    wifi_peripheral: esp_hal::peripherals::WIFI<'static>,
     event_channel: &'static Channel<CriticalSectionRawMutex, WifiEvent, WIFI_EVENT_QUEUE_SIZE>,
-    connected_signal: &'static Signal<CriticalSectionRawMutex, bool>,
 ) {
     println!("RustRTOS Network Benchmark Suite");
     println!("ESP32-S3 @ 240MHz");
 
-    // 收集结果
-    let mut results: heapless::Vec<BenchmarkResult, 8> = heapless::Vec::new();
+    let mut results: heapless::Vec<BenchmarkResult, 4> = heapless::Vec::new();
 
-    // 初始化
-    let mut wifi_ctrl = WifiController::new(event_channel, connected_signal);
-
-    println!("[Init] Initializing WiFi controller...");
-    if let Err(e) = wifi_ctrl.init().await {
-        println!("WiFi init failed: {:?}", e);
-        return;
-    }
+    let mut wifi_ctrl = match WifiController::new(radio, wifi_peripheral, event_channel) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("WiFi controller init failed: {:?}", e);
+            return;
+        }
+    };
 
     if let Err(e) = wifi_ctrl.set_mode(WifiMode::Sta).await {
         println!("Set mode failed: {:?}", e);
         return;
     }
-    println!("[Init] WiFi ready");
 
-    // 初始化网络栈
-    let mut stack = NetworkStack::new(StackConfig::default());
-    if let Err(e) = stack.init().await {
-        println!("Stack init failed: {:?}", e);
+    println!("Running benchmark 1/4: WiFi Connection + DHCP Time");
+    println!("Connecting to '{}'...", WIFI_SSID);
+
+    let connect_start = Instant::now();
+    let connect_result = wifi_ctrl.connect(WIFI_SSID, WIFI_PASSWORD).await;
+    let connect_time = connect_start.elapsed();
+
+    if connect_result.is_err() {
+        println!("Connection failed!");
+        let _ = results.push(BenchmarkResult {
+            name: "WiFi Connect + DHCP",
+            duration_us: connect_time.as_micros(),
+            ..Default::default()
+        });
+        print_summary(&results);
+        return;
+    }
+    println!("WiFi connected in {} ms", connect_time.as_millis());
+
+    let device = match wifi_ctrl.take_sta() {
+        Some(d) => d,
+        None => {
+            println!("STA interface already taken");
+            return;
+        }
+    };
+    let seed = esp_hal::rng::Rng::new().random() as u64;
+    let (stack, runner) = NetworkStack::new(
+        device,
+        StackConfig::default(),
+        NET_RESOURCES.init(embassy_net::StackResources::new()),
+        seed,
+    );
+    if spawner.spawn(net_task(runner)).is_err() {
+        println!("Failed to spawn net_task");
         return;
     }
 
-    // 运行基准测试
+    let dhcp_start = Instant::now();
+    let ip_info = stack.wait_for_ip().await;
+    let dhcp_time = dhcp_start.elapsed();
 
-    // 1. WiFi连接时间
-    println!("Running benchmark 1/4: WiFi Connection Time");
-    let result = benchmark_wifi_connect(&mut wifi_ctrl).await;
-    let _ = results.push(result);
+    match &ip_info {
+        Ok(info) => {
+            println!("Got IP: {} in {} ms", info.ip, dhcp_time.as_millis());
+            if let Some(gw) = info.gateway {
+                wifi_ctrl.set_ip_address(info.ip.octets(), gw.octets());
+            }
+        }
+        Err(e) => println!("DHCP failed: {:?}", e),
+    }
 
-    // 确保已连接并有IP
-    if !wifi_ctrl.is_connected() {
-        if let Err(e) = wifi_ctrl.connect(WIFI_SSID, WIFI_PASSWORD).await {
-            println!("Connect failed: {:?}", e);
-            return;
+    let total_time = connect_time + dhcp_time;
+    let _ = results.push(BenchmarkResult {
+        name: "WiFi Connect + DHCP",
+        duration_us: total_time.as_micros(),
+        avg_latency_us: connect_time.as_micros() as u32,
+        min_latency_us: connect_time.as_micros() as u32,
+        max_latency_us: total_time.as_micros() as u32,
+        ..Default::default()
+    });
+
+    if ip_info.is_err() {
+        print_summary(&results);
+        // net_task 已 spawn 且永久存活,此处 return 会 drop wifi_ctrl 触发
+        // wifi_deinit,runner 后续 dispatch 访问已释放驱动(LoadProhibited)。park。
+        loop {
+            Timer::after(Duration::from_secs(60)).await;
         }
     }
 
-    if let Err(e) = wifi_ctrl.wait_for_ip().await {
-        println!("Get IP failed: {:?}", e);
-        return;
-    }
+    let stack_handle = stack.stack();
 
-    if let Err(e) = stack.start_dhcp().await {
-        println!("DHCP failed: {:?}", e);
-        return;
-    }
+    let rx_buf = TCP_RX_BUF.init([0u8; TCP_BUFFER_SIZE]);
+    let tx_buf = TCP_TX_BUF.init([0u8; TCP_BUFFER_SIZE]);
 
-    // 2. TCP发送吞吐量
     println!("Running benchmark 2/4: TCP TX Throughput");
-    let result = benchmark_tcp_throughput_tx(&stack).await;
+    let result = benchmark_tcp_throughput_tx(stack_handle, rx_buf, tx_buf).await;
     let _ = results.push(result);
 
     Timer::after(Duration::from_secs(2)).await;
 
-    // 3. TCP接收吞吐量
     println!("Running benchmark 3/4: TCP RX Throughput");
-    let result = benchmark_tcp_throughput_rx(&stack).await;
+    let result = benchmark_tcp_throughput_rx(stack_handle, rx_buf, tx_buf).await;
     let _ = results.push(result);
 
     Timer::after(Duration::from_secs(2)).await;
 
-    // 4. TCP延迟
     println!("Running benchmark 4/4: TCP Latency");
-    let result = benchmark_tcp_latency(&stack).await;
+    let result = benchmark_tcp_latency(stack_handle, rx_buf, tx_buf).await;
     let _ = results.push(result);
 
-    // 输出结果汇总
-    println!("BENCHMARK RESULTS SUMMARY");
-
-    for result in &results {
-        result.print();
-    }
+    print_summary(&results);
 
     println!("Benchmark Suite Complete!");
 
-    // 保持运行
     loop {
         Timer::after(Duration::from_secs(60)).await;
     }
 }
 
+fn print_summary(results: &heapless::Vec<BenchmarkResult, 4>) {
+    println!("BENCHMARK RESULTS SUMMARY");
+
+    for result in results {
+        result.print();
+    }
+}
+
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
-    // 初始化堆分配器
     init_heap();
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -503,30 +475,30 @@ async fn main(spawner: Spawner) {
     println!("RustRTOS Network Benchmark");
     println!("ESP32-S3 @ 240MHz");
 
-    // 初始化esp-rtos时间驱动
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    // 初始化esp-radio (WiFi/BLE驱动)
-    match esp_radio::init() {
-        Ok(_controller) => println!("esp-radio initialized successfully"),
+    static RADIO_CONTROLLER: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
+    let radio = match esp_radio::init() {
+        Ok(ctrl) => {
+            println!("esp-radio initialized successfully");
+            RADIO_CONTROLLER.init(ctrl)
+        }
         Err(e) => {
             println!("esp-radio init failed: {:?}", e);
             loop { core::hint::spin_loop(); }
         }
-    }
+    };
 
-    // 初始化静态通道
     let event_channel = WIFI_EVENT_CHANNEL.init(Channel::new());
-    let connected_signal = WIFI_CONNECTED_SIGNAL.init(Signal::new());
 
-    // 启动基准测试任务
     spawner.spawn(benchmark_task(
+        spawner,
+        radio,
+        peripherals.WIFI,
         event_channel,
-        connected_signal,
     )).ok();
 
-    // 主循环
     loop {
         Timer::after(Duration::from_secs(60)).await;
     }

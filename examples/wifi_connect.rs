@@ -1,10 +1,3 @@
-//! WiFi连接示例 - 使用真实esp-radio API
-//! 演示如何连接到WiFi网络并获取IP地址。
-//! 配置
-//! 修改WIFI_SSID和WIFI_PASSWORD常量。
-//! 运行
-//! cargo run --example wifi_connect --features wifi,dev --release
-
 #![no_std]
 #![no_main]
 
@@ -20,16 +13,13 @@ use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use static_cell::StaticCell;
 
-// 直接使用esp-radio API
 use esp_radio::wifi::{
-    ModeConfig, WifiController, ClientConfig, WifiEvent,
+    ModeConfig, WifiController, ClientConfig,
 };
 
-// WiFi配置
-const WIFI_SSID: &str = "ESP32S3";
-const WIFI_PASSWORD: &str = "213213213";
+const WIFI_SSID: &str = "YourSSID";
+const WIFI_PASSWORD: &str = "YourPassword";
 
-/// 初始化堆分配器
 fn init_heap() {
     const HEAP_SIZE: usize = 72 * 1024;
     static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
@@ -60,13 +50,11 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-/// WiFi连接任务
 #[embassy_executor::task]
 async fn wifi_connect_task(wifi_ctrl: &'static mut WifiController<'static>) {
     println!("WiFi connect task started");
     println!("Target SSID: {}", WIFI_SSID);
 
-    // 配置为Station模式
     let station_config = ModeConfig::Client(
         ClientConfig::default()
             .with_ssid(WIFI_SSID.try_into().unwrap())
@@ -79,42 +67,32 @@ async fn wifi_connect_task(wifi_ctrl: &'static mut WifiController<'static>) {
     }
     println!("WiFi config set successfully");
 
-    // 启动WiFi
     if let Err(e) = wifi_ctrl.start_async().await {
         println!("WiFi start failed: {:?}", e);
         return;
     }
     println!("WiFi started");
 
-    // 连接到AP
     println!("Connecting to AP...");
     if let Err(e) = wifi_ctrl.connect_async().await {
         println!("WiFi connect failed: {:?}", e);
         return;
     }
-    println!("WiFi connected!");
+    // connect_async() 内部已等待 StaConnected 事件后才返回 Ok,链路此时已建立;
+    // 再次 wait_for_event(StaConnected) 会因事件已被消费而永久阻塞。
+    println!("StaConnected event observed by connect_async; link is up.");
 
-    // 等待连接事件
-    println!("Waiting for StaConnected event...");
-    wifi_ctrl.wait_for_event(WifiEvent::StaConnected).await;
-    println!("StaConnected event received!");
-
-    // 获取MAC地址
     let mac = esp_radio::wifi::sta_mac();
     println!("STA MAC: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    // 获取RSSI
     match wifi_ctrl.rssi() {
         Ok(rssi) => println!("Signal strength: {} dBm", rssi),
         Err(e) => println!("Failed to get RSSI: {:?}", e),
     }
 
     println!("WiFi Connected Successfully!");
-    println!("Note: For IP address, you need to run a DHCP client");
-    println!("using embassy-net stack.");
 
-    // 保持连接并监控状态
     let mut connected = true;
     loop {
         Timer::after(Duration::from_secs(5)).await;
@@ -127,7 +105,6 @@ async fn wifi_connect_task(wifi_ctrl: &'static mut WifiController<'static>) {
                         println!("[STATUS] Reconnected!");
                     } else {
                         println!("[STATUS] Disconnected!");
-                        // 尝试重连
                         println!("[STATUS] Attempting reconnect...");
                         let _ = wifi_ctrl.connect_async().await;
                     }
@@ -136,7 +113,6 @@ async fn wifi_connect_task(wifi_ctrl: &'static mut WifiController<'static>) {
             Err(e) => println!("[STATUS] Error checking connection: {:?}", e),
         }
 
-        // 每30秒显示RSSI
         if connected {
             if let Ok(rssi) = wifi_ctrl.rssi() {
                 println!("[STATUS] RSSI: {} dBm", rssi);
@@ -154,11 +130,9 @@ async fn main(spawner: Spawner) {
     println!("RustRTOS WiFi Connect Example");
     println!("ESP32-S3 @ 240MHz");
 
-    // 初始化时钟
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    // 初始化esp-radio控制器
     let radio_controller = match esp_radio::init() {
         Ok(ctrl) => {
             println!("esp-radio initialized successfully");
@@ -170,11 +144,9 @@ async fn main(spawner: Spawner) {
         }
     };
 
-    // 存储radio controller
     static RADIO_CONTROLLER: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
     let radio_ref = RADIO_CONTROLLER.init(radio_controller);
 
-    // 创建WiFi控制器
     let (controller, _interfaces) = match esp_radio::wifi::new(
         radio_ref,
         peripherals.WIFI,
