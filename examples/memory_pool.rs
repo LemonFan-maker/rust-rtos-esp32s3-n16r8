@@ -1,11 +1,3 @@
-//! 内存池示例 - 固定大小内存分配
-//! 演示内存池的使用:
-//! - 零碎片内存分配
-//! - 快速分配/释放
-//! - 适用于实时系统
-//! 运行
-//! cargo run --example memory_pool --features dev --target xtensa-esp32s3-none-elf
-
 #![no_std]
 #![no_main]
 
@@ -16,7 +8,6 @@ use embassy_time::{Duration, Instant, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use rustrtos::mem::pool::{MemoryPool, Backend};
 
-// 条件编译日志
 #[cfg(feature = "dev")]
 use esp_println::println;
 
@@ -25,7 +16,6 @@ macro_rules! println {
     ($($arg:tt)*) => {};
 }
 
-// Panic Handler
 #[cfg(feature = "dev")]
 use esp_backtrace as _;
 
@@ -35,7 +25,6 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-/// 示例数据结构
 #[derive(Default, Clone)]
 struct SensorData {
     timestamp: u32,
@@ -43,15 +32,12 @@ struct SensorData {
     flags: u8,
 }
 
-/// 内存池测试任务
 #[embassy_executor::task]
 async fn pool_test_task() {
     println!("Memory Pool Test Started");
 
-    // 创建一个包含32个SensorData的内存池
     static POOL: MemoryPool<SensorData, 32, {Backend::Dram as u8}> = MemoryPool::new();
 
-    // 测量分配性能
     println!("Allocation Performance Test");
 
     let start = Instant::now();
@@ -64,7 +50,6 @@ async fn pool_test_task() {
             item.value = (i * 2) as i32;
             item.flags = 1;
             alloc_count += 1;
-            // 立即释放以便重复使用
             drop(item);
         }
     }
@@ -74,10 +59,8 @@ async fn pool_test_task() {
     println!("Total time: {} us", elapsed.as_micros());
     println!("Average: {} ns per cycle", elapsed.as_micros() * 1000 / iterations as u64);
 
-    // 测试并发使用
     println!("Concurrent Usage Test");
 
-    // 分配所有槽位
     let mut items = heapless::Vec::<_, 32>::new();
     for i in 0..32 {
         if let Ok(mut item) = POOL.alloc() {
@@ -90,18 +73,15 @@ async fn pool_test_task() {
     println!("Allocated {} items", items.len());
     println!("Pool usage: {}/32", POOL.allocated_count());
 
-    // 尝试再分配应该失败
     let extra = POOL.alloc();
     println!("Extra allocation: {}", if extra.is_ok() { "success" } else { "failed (expected)" });
 
-    // 释放一半
     for _ in 0..16 {
         items.pop();
     }
 
     println!("After releasing 16: {}/32 used", POOL.allocated_count());
 
-    // 再次分配
     for _ in 0..8 {
         if let Ok(item) = POOL.alloc() {
             items.push(item).ok();

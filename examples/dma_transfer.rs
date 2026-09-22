@@ -1,10 +1,3 @@
-//! DMA传输示例 - 直接内存访问
-//! 演示DMA缓冲区管理:
-//! - DMA对齐的缓冲区分配
-//! - 零拷贝数据传输概念
-//! 运行
-//! cargo run --example dma_transfer --features dev --target xtensa-esp32s3-none-elf
-
 #![no_std]
 #![no_main]
 
@@ -15,7 +8,6 @@ use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use rustrtos::mem::dma::{DmaBuffer, DmaStrategy};
 
-// 条件编译日志
 #[cfg(feature = "dev")]
 use esp_println::println;
 
@@ -24,7 +16,6 @@ macro_rules! println {
     ($($arg:tt)*) => {};
 }
 
-// Panic Handler
 #[cfg(feature = "dev")]
 use esp_backtrace as _;
 
@@ -34,12 +25,10 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-/// DMA演示任务
 #[embassy_executor::task]
 async fn dma_demo_task() {
     println!("DMA Demo Task Started");
 
-    // 创建DMA缓冲区
     println!("DMA Buffer Allocation");
 
     let mut buffer: DmaBuffer<256> = DmaBuffer::new(DmaStrategy::ForceDram);
@@ -49,7 +38,6 @@ async fn dma_demo_task() {
     println!("Alignment: {} bytes", buffer.alignment());
     println!("Strategy: {:?}", buffer.strategy());
 
-    // 写入测试数据
     println!("Write Test Data");
     {
         let data = buffer.as_mut_slice();
@@ -59,7 +47,6 @@ async fn dma_demo_task() {
     }
     println!("Wrote {} bytes of test pattern", 256);
 
-    // 验证数据
     println!("Verify Data");
     let mut errors = 0;
     {
@@ -72,7 +59,6 @@ async fn dma_demo_task() {
     }
     println!("Verification: {} errors found", errors);
 
-    // 测试切片操作
     println!("Slice Operations");
     {
         let read_data = buffer.as_slice();
@@ -81,12 +67,10 @@ async fn dma_demo_task() {
         println!("Sum of first 16 bytes: {} (expected: {})", sum, (0..16).sum::<u32>());
     }
 
-    // 测试填充操作
     println!("Fill Operation");
     buffer.fill(0xAA);
     println!("Filled buffer with 0xAA");
 
-    // 验证填充
     {
         let data = buffer.as_slice();
         let all_aa = data.iter().all(|&b| b == 0xAA);
