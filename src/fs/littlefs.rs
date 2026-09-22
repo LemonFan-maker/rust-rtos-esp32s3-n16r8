@@ -1,53 +1,68 @@
-//! LittleFS文件系统封装
-//! 提供基于littlefs2的文件系统操作API
-
 use core::fmt;
-use super::storage::{FlashStorage, StorageError};
 
-/// 文件系统错误
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use littlefs2::consts::{U16, U256};
+use littlefs2::driver;
+use littlefs2::fs::{
+    Allocation, File as LfsFile, Filesystem as LfsFilesystem, OpenOptions as LfsOpenOptions,
+    ReadDir as LfsReadDir,
+};
+use littlefs2::io::{
+    self as lfsio, Error as LfsError, SeekFrom as LfsSeekFrom,
+};
+use littlefs2::path::PathBuf;
+
+use super::storage::{FLASH_SECTOR_SIZE, FLASH_WORD_SIZE, FlashStorage, StorageError};
+
+const LFS_CACHE_SIZE: usize = 256;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FsError {
-    /// 存储层错误
     Storage(StorageError),
-    /// 文件系统损坏
     Corrupt,
-    /// 文件/目录不存在
     NotFound,
-    /// 文件/目录已存在
     AlreadyExists,
-    /// 不是目录
     NotADirectory,
-    /// 不是文件
     NotAFile,
-    /// 目录非空
     DirectoryNotEmpty,
-    /// 无效参数
     InvalidParam,
-    /// 路径过长
     PathTooLong,
-    /// 文件名过长
     NameTooLong,
-    /// 空间不足
     NoSpace,
-    /// 文件系统已满
     Full,
-    /// 打开的文件过多
     TooManyOpenFiles,
-    /// 无效的文件句柄
     InvalidHandle,
-    /// 文件系统未挂载
     NotMounted,
-    /// 挂载失败
     MountFailed,
-    /// 格式化失败
     FormatFailed,
-    /// IO错误
-    IoError,
+    Other(LfsError),
 }
 
 impl From<StorageError> for FsError {
     fn from(e: StorageError) -> Self {
         Self::Storage(e)
+    }
+}
+
+impl From<LfsError> for FsError {
+    fn from(e: LfsError) -> Self {
+        match e {
+            LfsError::Success => Self::InvalidParam,
+            LfsError::Io => Self::Storage(StorageError::WriteError),
+            LfsError::Corruption => Self::Corrupt,
+            LfsError::NoSuchEntry => Self::NotFound,
+            LfsError::EntryAlreadyExisted => Self::AlreadyExists,
+            LfsError::PathNotDir => Self::NotADirectory,
+            LfsError::PathIsDir => Self::NotAFile,
+            LfsError::DirNotEmpty => Self::DirectoryNotEmpty,
+            LfsError::BadFileDescriptor => Self::InvalidHandle,
+            LfsError::FileTooBig => Self::Full,
+            LfsError::Invalid => Self::InvalidParam,
+            LfsError::NoSpace => Self::NoSpace,
+            LfsError::NoMemory => Self::Full,
+            LfsError::NoAttribute => Self::NotFound,
+            LfsError::FilenameTooLong => Self::NameTooLong,
+            other => Self::Other(other),
+        }
     }
 }
 
@@ -71,62 +86,74 @@ impl fmt::Display for FsError {
             Self::NotMounted => write!(f, "Not mounted"),
             Self::MountFailed => write!(f, "Mount failed"),
             Self::FormatFailed => write!(f, "Format failed"),
-            Self::IoError => write!(f, "IO error"),
+            Self::Other(e) => write!(f, "littlefs error: {:?}", e),
         }
     }
 }
 
-/// 文件类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
-    /// 普通文件
     File,
-    /// 目录
     Directory,
 }
 
-/// 文件元数据
 #[derive(Debug, Clone)]
 pub struct Metadata {
-    /// 文件类型
     pub file_type: FileType,
-    /// 文件大小(目录为0)
     pub size: u32,
-    /// 文件名
     pub name: heapless::String<64>,
 }
 
 impl Metadata {
-    /// 是否为文件
     pub fn is_file(&self) -> bool {
         matches!(self.file_type, FileType::File)
     }
 
-    /// 是否为目录
     pub fn is_dir(&self) -> bool {
         matches!(self.file_type, FileType::Directory)
     }
 }
 
-/// 文件打开选项
+fn tail_name(path: &str, out: &mut heapless::String<64>) -> Result<(), FsError> {
+    let tail = match path.rfind('/') {
+        Some(i) => &path[i + 1..],
+        None => path,
+    };
+    if tail.len() > out.capacity() {
+        return Err(FsError::NameTooLong);
+    }
+    out.push_str(tail).map_err(|_| FsError::NameTooLong)?;
+    Ok(())
+}
+
+fn make_path(path: &str) -> Result<PathBuf, FsError> {
+    let bytes = path.as_bytes();
+    if bytes.is_empty() {
+        return Err(FsError::InvalidParam);
+    }
+    if bytes.len() > littlefs2::consts::PATH_MAX {
+        return Err(FsError::PathTooLong);
+    }
+    if !bytes.is_ascii() {
+        return Err(FsError::InvalidParam);
+    }
+    if bytes.contains(&0u8) {
+        return Err(FsError::InvalidParam);
+    }
+    Ok(PathBuf::from(bytes))
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OpenOptions {
-    /// 读取权限
     pub read: bool,
-    /// 写入权限
     pub write: bool,
-    /// 如果不存在则创建
     pub create: bool,
-    /// 创建新文件(如果存在则失败)
     pub create_new: bool,
-    /// 追加模式
     pub append: bool,
-    /// 截断文件
     pub truncate: bool,
 }
 
 impl OpenOptions {
-    /// 创建新的打开选项
     pub const fn new() -> Self {
         Self {
             read: false,
@@ -138,484 +165,418 @@ impl OpenOptions {
         }
     }
 
-    /// 设置读取权限
     pub const fn read(mut self, read: bool) -> Self {
         self.read = read;
         self
     }
 
-    /// 设置写入权限
     pub const fn write(mut self, write: bool) -> Self {
         self.write = write;
         self
     }
 
-    /// 设置创建标志
     pub const fn create(mut self, create: bool) -> Self {
         self.create = create;
         self
     }
 
-    /// 设置创建新文件标志
     pub const fn create_new(mut self, create_new: bool) -> Self {
         self.create_new = create_new;
         self
     }
 
-    /// 设置追加模式
     pub const fn append(mut self, append: bool) -> Self {
         self.append = append;
         self
     }
 
-    /// 设置截断标志
     pub const fn truncate(mut self, truncate: bool) -> Self {
         self.truncate = truncate;
         self
     }
 
-    /// 只读打开
     pub const fn read_only() -> Self {
         Self::new().read(true)
     }
 
-    /// 只写打开(创建或截断)
     pub const fn write_only() -> Self {
         Self::new().write(true).create(true).truncate(true)
     }
 
-    /// 读写打开
     pub const fn read_write() -> Self {
         Self::new().read(true).write(true)
     }
 
-    /// 追加模式打开
     pub const fn append_mode() -> Self {
         Self::new().write(true).create(true).append(true)
     }
-}
 
-/// 文件句柄
-pub struct File<'a> {
-    /// 文件系统引用
-    fs: &'a FileSystem,
-    /// 内部文件ID
-    id: u32,
-    /// 打开选项
-    options: OpenOptions,
-    /// 当前位置
-    position: u32,
-    /// 文件大小(缓存)
-    size: u32,
-}
-
-impl<'a> File<'a> {
-    /// 读取数据
-    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, FsError> {
-        if !self.options.read {
-            return Err(FsError::InvalidParam);
+    fn apply(&self, o: &mut LfsOpenOptions) {
+        o.read(self.read);
+        o.write(self.write);
+        if self.create_new {
+            o.create_new(true);
+        } else {
+            o.create(self.create);
         }
-
-        // 计算可读取的字节数
-        let available = self.size.saturating_sub(self.position) as usize;
-        let to_read = core::cmp::min(buffer.len(), available);
-
-        if to_read == 0 {
-            return Ok(0);
-        }
-
-        // 调用底层读取
-        let read = self.fs.read_file_internal(self.id, self.position, &mut buffer[..to_read])?;
-        self.position += read as u32;
-
-        Ok(read)
-    }
-
-    /// 写入数据
-    pub fn write(&mut self, data: &[u8]) -> Result<usize, FsError> {
-        if !self.options.write {
-            return Err(FsError::InvalidParam);
-        }
-
-        // 调用底层写入
-        let written = self.fs.write_file_internal(self.id, self.position, data)?;
-        self.position += written as u32;
-
-        // 更新文件大小
-        if self.position > self.size {
-            self.size = self.position;
-        }
-
-        Ok(written)
-    }
-
-    /// 写入全部数据
-    pub fn write_all(&mut self, data: &[u8]) -> Result<(), FsError> {
-        let mut offset = 0;
-        while offset < data.len() {
-            let written = self.write(&data[offset..])?;
-            if written == 0 {
-                return Err(FsError::NoSpace);
-            }
-            offset += written;
-        }
-        Ok(())
-    }
-
-    /// 移动文件指针
-    pub fn seek(&mut self, pos: SeekFrom) -> Result<u32, FsError> {
-        let new_pos = match pos {
-            SeekFrom::Start(offset) => offset as i64,
-            SeekFrom::End(offset) => self.size as i64 + offset,
-            SeekFrom::Current(offset) => self.position as i64 + offset,
-        };
-
-        if new_pos < 0 {
-            return Err(FsError::InvalidParam);
-        }
-
-        self.position = new_pos as u32;
-        Ok(self.position)
-    }
-
-    /// 获取当前位置
-    pub fn position(&self) -> u32 {
-        self.position
-    }
-
-    /// 获取文件大小
-    pub fn size(&self) -> u32 {
-        self.size
-    }
-
-    /// 同步文件到存储
-    pub fn sync(&mut self) -> Result<(), FsError> {
-        self.fs.sync_file_internal(self.id)
-    }
-
-    /// 截断文件到指定大小
-    pub fn truncate(&mut self, size: u32) -> Result<(), FsError> {
-        if !self.options.write {
-            return Err(FsError::InvalidParam);
-        }
-
-        self.fs.truncate_file_internal(self.id, size)?;
-        self.size = size;
-
-        if self.position > size {
-            self.position = size;
-        }
-
-        Ok(())
+        o.append(self.append);
+        o.truncate(self.truncate);
     }
 }
 
-/// 文件指针位置
 #[derive(Debug, Clone, Copy)]
 pub enum SeekFrom {
-    /// 从文件开头
     Start(u32),
-    /// 从文件末尾
     End(i64),
-    /// 从当前位置
     Current(i64),
 }
 
-/// 目录迭代器
-pub struct Dir<'a> {
-    /// 文件系统引用
-    fs: &'a FileSystem,
-    /// 内部目录ID
-    id: u32,
-    /// 迭代索引
-    index: u32,
+pub struct File<'a, 'b, 'c, S: driver::Storage> {
+    inner: &'c LfsFile<'a, 'b, S>,
 }
 
-impl<'a> Dir<'a> {
-    /// 读取下一个目录项
-    pub fn next(&mut self) -> Result<Option<Metadata>, FsError> {
-        let result = self.fs.read_dir_internal(self.id, self.index)?;
-        if result.is_some() {
-            self.index += 1;
-        }
-        Ok(result)
+impl<'a, 'b, 'c, S: driver::Storage> File<'a, 'b, 'c, S> {
+    pub fn read(&self, buffer: &mut [u8]) -> Result<usize, FsError> {
+        self.inner.read(buffer).map_err(FsError::from)
     }
 
-    /// 重置迭代器到开头
-    pub fn rewind(&mut self) {
-        self.index = 0;
+    pub fn read_exact(&self, buffer: &mut [u8]) -> Result<(), FsError> {
+        use lfsio::Read;
+        self.inner.read_exact(buffer).map_err(FsError::from)
     }
-}
 
-/// 文件系统配置
-#[derive(Debug, Clone, Copy)]
-pub struct FsConfig {
-    /// 块大小
-    pub block_size: u32,
-    /// 总块数
-    pub block_count: u32,
-    /// 读缓冲区大小
-    pub read_size: u32,
-    /// 写缓冲区大小(编程大小)
-    pub prog_size: u32,
-    /// 块缓存大小
-    pub cache_size: u32,
-    /// lookahead缓冲区大小
-    pub lookahead_size: u32,
-    /// 块周期(磨损均衡)
-    pub block_cycles: i32,
-}
+    pub fn write(&self, data: &[u8]) -> Result<usize, FsError> {
+        self.inner.write(data).map_err(FsError::from)
+    }
 
-impl Default for FsConfig {
-    fn default() -> Self {
-        Self {
-            block_size: 4096,
-            block_count: 0,  // 从存储获取
-            read_size: 256,
-            prog_size: 256,
-            cache_size: 512,
-            lookahead_size: 16,
-            block_cycles: 500,
-        }
+    pub fn write_all(&self, data: &[u8]) -> Result<(), FsError> {
+        use lfsio::Write;
+        self.inner.write_all(data).map_err(FsError::from)
+    }
+
+    pub fn seek(&self, pos: SeekFrom) -> Result<u32, FsError> {
+        let lp = match pos {
+            SeekFrom::Start(o) => LfsSeekFrom::Start(o),
+            SeekFrom::End(o) => LfsSeekFrom::End(i64_to_i32(o)?),
+            SeekFrom::Current(o) => LfsSeekFrom::Current(i64_to_i32(o)?),
+        };
+        let n = self.inner.seek(lp).map_err(FsError::from)?;
+        usize_to_u32(n)
+    }
+
+    pub fn position(&self) -> Result<u32, FsError> {
+        let n = self
+            .inner
+            .seek(LfsSeekFrom::Current(0))
+            .map_err(FsError::from)?;
+        usize_to_u32(n)
+    }
+
+    pub fn size(&self) -> Result<u32, FsError> {
+        let n = self.inner.len().map_err(FsError::from)?;
+        usize_to_u32(n)
+    }
+
+    pub fn sync(&self) -> Result<(), FsError> {
+        self.inner.sync().map_err(FsError::from)
+    }
+
+    pub fn truncate(&self, size: u32) -> Result<(), FsError> {
+        self.inner.set_len(size as usize).map_err(FsError::from)
     }
 }
 
-/// LittleFS文件系统
-pub struct FileSystem {
-    /// 存储适配器
-    storage: super::storage::littlefs_adapter::LfsStorageAdapter,
-    /// 文件系统配置
-    config: FsConfig,
-    /// 是否已挂载
-    mounted: bool,
-    /// 下一个文件ID
-    next_file_id: u32,
-    /// 下一个目录ID
-    next_dir_id: u32,
+fn i64_to_i32(v: i64) -> Result<i32, FsError> {
+    i32::try_from(v).map_err(|_| FsError::InvalidParam)
 }
 
-impl FileSystem {
-    /// 创建文件系统实例
-    pub fn new(storage: FlashStorage) -> Self {
-        let adapter = super::storage::littlefs_adapter::LfsStorageAdapter::new(storage);
-        let block_count = adapter.block_count();
+fn usize_to_u32(v: usize) -> Result<u32, FsError> {
+    u32::try_from(v).map_err(|_| FsError::InvalidParam)
+}
 
-        Self {
-            storage: adapter,
-            config: FsConfig {
-                block_count,
-                ..Default::default()
-            },
-            mounted: false,
-            next_file_id: 1,
-            next_dir_id: 1,
+pub struct LfsDevice<'d, const BLOCK_COUNT: usize> {
+    flash: FlashStorage<'d>,
+    last_error: Option<StorageError>,
+}
+
+impl<'d, const BLOCK_COUNT: usize> LfsDevice<'d, BLOCK_COUNT> {
+    pub fn new(mut flash: FlashStorage<'d>) -> Result<Self, StorageError> {
+        flash.init()?;
+        let cfg = *flash.config();
+        if cfg.partition_offset % FLASH_SECTOR_SIZE != 0 {
+            return Err(StorageError::AlignmentError);
+        }
+        if (cfg.partition_size / FLASH_SECTOR_SIZE) < BLOCK_COUNT as u32 {
+            return Err(StorageError::OutOfBounds);
+        }
+        if (cfg.partition_offset as u64 + (BLOCK_COUNT as u64) * FLASH_SECTOR_SIZE as u64)
+            > cfg.total_size as u64
+        {
+            return Err(StorageError::OutOfBounds);
+        }
+        Ok(Self {
+            flash,
+            last_error: None,
+        })
+    }
+
+    pub fn take_last_error(&mut self) -> Option<StorageError> {
+        self.last_error.take()
+    }
+
+    pub fn flash(&self) -> &FlashStorage<'d> {
+        &self.flash
+    }
+
+    fn fail(&mut self, e: StorageError) -> lfsio::Error {
+        self.last_error = Some(e);
+        lfsio::Error::Io
+    }
+}
+
+impl<'d, const BLOCK_COUNT: usize> driver::Storage for LfsDevice<'d, BLOCK_COUNT> {
+    const READ_SIZE: usize = FLASH_WORD_SIZE as usize;
+    const WRITE_SIZE: usize = FLASH_WORD_SIZE as usize;
+    const BLOCK_SIZE: usize = FLASH_SECTOR_SIZE as usize;
+    const BLOCK_COUNT: usize = BLOCK_COUNT;
+    const BLOCK_CYCLES: isize = 500;
+
+    type CACHE_SIZE = U256;
+    type LOOKAHEAD_SIZE = U16;
+
+    fn read(&mut self, off: usize, buf: &mut [u8]) -> lfsio::Result<usize> {
+        match self.flash.read(off as u32, buf) {
+            Ok(()) => Ok(buf.len()),
+            Err(e) => Err(self.fail(e)),
         }
     }
 
-    /// 使用自定义配置创建
-    pub fn with_config(storage: FlashStorage, mut config: FsConfig) -> Self {
-        let adapter = super::storage::littlefs_adapter::LfsStorageAdapter::new(storage);
-
-        if config.block_count == 0 {
-            config.block_count = adapter.block_count();
-        }
-
-        Self {
-            storage: adapter,
-            config,
-            mounted: false,
-            next_file_id: 1,
-            next_dir_id: 1,
+    fn write(&mut self, off: usize, data: &[u8]) -> lfsio::Result<usize> {
+        match self.flash.write(off as u32, data) {
+            Ok(()) => Ok(data.len()),
+            Err(e) => Err(self.fail(e)),
         }
     }
 
-    /// 挂载文件系统
-    /// 实现说明
-    /// 当前使用简化的魔数检查。完整实现应使用littlefs2 crate:
-    /// use littlefs2::fs::Filesystem;
-    /// let mut alloc = Filesystem::allocate();
-    /// Filesystem::mount(&mut alloc, storage)?;
-    pub fn mount(&mut self) -> Result<(), FsError> {
-        if self.mounted {
-            return Ok(());
+    fn erase(&mut self, off: usize, len: usize) -> lfsio::Result<usize> {
+        match self.flash.erase(off as u32, len as u32) {
+            Ok(()) => Ok(len),
+            Err(e) => Err(self.fail(e)),
         }
+    }
+}
 
-        // 初始化存储
-        self.storage.inner_mut().init()?;
+pub struct Dir<'a, 'b, 'c, S: driver::Storage> {
+    inner: &'c mut LfsReadDir<'a, 'b, S>,
+}
 
-        // 简化实现: 读取超级块验证魔数
-        // 完整实现应使用littlefs2::fs::Filesystem::mount()
-        let mut buffer = [0u8; 4096];
-        self.storage.read(0, 0, &mut buffer)?;
+impl<'a, 'b, 'c, S: driver::Storage> Iterator for Dir<'a, 'b, 'c, S> {
+    type Item = Result<Metadata, FsError>;
 
-        // 检查littlefs魔数 "littlefs"
-        if &buffer[8..16] != b"littlefs" {
-            return Err(FsError::Corrupt);
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next() {
+            None => None,
+            Some(Err(e)) => Some(Err(FsError::from(e))),
+            Some(Ok(entry)) => Some(entry_to_metadata(entry)),
         }
+    }
+}
 
-        self.mounted = true;
+fn entry_to_metadata(entry: littlefs2::fs::DirEntry) -> Result<Metadata, FsError> {
+    let m = entry.metadata();
+    let mut name = heapless::String::<64>::new();
+    let name_str: &str = entry.file_name().as_ref();
+    tail_name(name_str, &mut name)?;
+    Ok(Metadata {
+        file_type: if m.is_dir() {
+            FileType::Directory
+        } else {
+            FileType::File
+        },
+        size: usize_to_u32(m.len())?,
+        name,
+    })
+}
+
+pub struct FileSystem<'a, S: driver::Storage> {
+    inner: LfsFilesystem<'a, S>,
+}
+
+impl<'a, S: driver::Storage> FileSystem<'a, S> {
+    pub fn allocate() -> Allocation<S> {
+        Allocation::new()
+    }
+
+    pub fn mount<'m>(
+        alloc: &'m mut Allocation<S>,
+        device: &'m mut S,
+    ) -> Result<FileSystem<'m, S>, FsError> {
+        let inner = LfsFilesystem::mount(alloc, device).map_err(|e| match e {
+            LfsError::Corruption | LfsError::NoSuchEntry => FsError::Corrupt,
+            other => FsError::from(other),
+        })?;
+        Ok(FileSystem { inner })
+    }
+
+    pub fn format(device: &mut S) -> Result<(), FsError> {
+        LfsFilesystem::format(device).map_err(|_| FsError::FormatFailed)?;
         Ok(())
     }
 
-    /// 卸载文件系统
-    /// 实现说明
-    /// 完整实现应使用littlefs2 crate的unmount方法。
-    pub fn unmount(&mut self) -> Result<(), FsError> {
-        if !self.mounted {
-            return Ok(());
+    fn probe_mounted(alloc: &mut Allocation<S>, device: &mut S) -> bool {
+        Self::mount(alloc, device).is_ok()
+    }
+
+    pub fn mount_or_format(
+        alloc: &'a mut Allocation<S>,
+        device: &'a mut S,
+    ) -> Result<(Self, bool), FsError> {
+        if Self::probe_mounted(alloc, device) {
+            Ok((Self::mount(alloc, device)?, false))
+        } else {
+            Self::format(device)?;
+            Ok((Self::mount(alloc, device)?, true))
         }
-
-        // 同步所有数据
-        self.storage.sync()?;
-
-        // 简化实现: 仅更新状态
-        // 完整实现应调用littlefs2::fs::Filesystem::unmount()
-
-        self.mounted = false;
-        Ok(())
     }
 
-    /// 格式化文件系统
-    /// 实现说明
-    /// 当前使用简化实现，只写入基本的魔数。
-    /// 完整实现应使用littlefs2 crate:
-    /// use littlefs2::fs::Filesystem;
-    /// Filesystem::format(storage)?;
-    pub fn format(&mut self) -> Result<(), FsError> {
-        // 如果已挂载，先卸载
-        if self.mounted {
-            self.unmount()?;
-        }
-
-        // 初始化存储
-        self.storage.inner_mut().init()?;
-
-        // 简化实现: 擦除前几个块并写入超级块
-        // 完整实现应使用littlefs2::fs::Filesystem::format()
-        for block in 0..core::cmp::min(4, self.config.block_count) {
-            self.storage.erase(block)?;
-        }
-
-        // 写入简化的超级块(包含littlefs魔数)
-        let mut superblock = [0xFFu8; 4096];
-        superblock[8..16].copy_from_slice(b"littlefs");
-        superblock[0..4].copy_from_slice(&0x00000002u32.to_le_bytes()); // version
-        superblock[4..8].copy_from_slice(&self.config.block_size.to_le_bytes());
-
-        self.storage.prog(0, 0, &superblock)?;
-        self.storage.sync()?;
-
-        Ok(())
+    pub fn total_blocks(&self) -> u32 {
+        self.inner.total_blocks() as u32
     }
 
-    /// 检查是否已挂载
-    pub fn is_mounted(&self) -> bool {
-        self.mounted
-    }
-
-    /// 获取配置
-    pub fn config(&self) -> &FsConfig {
-        &self.config
-    }
-
-    /// 获取已用空间(块数)
-    /// 实现说明
-    /// 当前返回0，完整实现应使用littlefs2的fs_size()方法。
     pub fn used_blocks(&self) -> Result<u32, FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
-        }
-
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::size()
-
-        Ok(0) // 占位
+        let avail = self.available_blocks()?;
+        let total = self.inner.total_blocks();
+        Ok((total - avail) as u32)
     }
 
-    /// 获取可用空间(块数)
     pub fn free_blocks(&self) -> Result<u32, FsError> {
-        let used = self.used_blocks()?;
-        Ok(self.config.block_count.saturating_sub(used))
+        let n = self.available_blocks()?;
+        Ok(n as u32)
     }
 
-    /// 获取总空间(字节)
+    fn available_blocks(&self) -> Result<usize, FsError> {
+        self.inner.available_blocks().map_err(FsError::from)
+    }
+
     pub fn total_bytes(&self) -> u32 {
-        self.config.block_count * self.config.block_size
+        self.inner.total_space() as u32
     }
 
-    // 文件操作
+    pub fn free_bytes(&self) -> Result<u32, FsError> {
+        let n = self
+            .inner
+            .available_space()
+            .map_err(FsError::from)?;
+        n.try_into().map_err(|_| FsError::InvalidParam)
+    }
 
-    /// 打开文件
-    /// 实现说明
-    /// 当前为占位实现，返回模拟的File结构。
-    /// 完整实现应使用littlefs2 crate的file_open方法。
-    pub fn open(&self, path: &str, options: OpenOptions) -> Result<File<'_>, FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
+    pub fn with_file<R>(
+        &self,
+        path: &str,
+        options: OpenOptions,
+        f: impl FnOnce(&mut File<'_, '_, '_, S>) -> Result<R, FsError>,
+    ) -> Result<R, FsError> {
+        let p = make_path(path)?;
+        let nested: lfsio::Result<Result<R, FsError>> =
+            self.inner
+                .open_file_with_options_and_then(
+                    |o| {
+                        options.apply(o);
+                        o
+                    },
+                    &p,
+                    |file| Ok(f(&mut File { inner: file })),
+                );
+        match nested {
+            Ok(Ok(r)) => Ok(r),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(FsError::from(e)),
         }
+    }
 
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::open()
-        let id = self.allocate_file_id();
-        let size = if options.truncate { 0 } else { self.get_file_size(path)? };
+    pub fn read_file(&self, path: &str, buffer: &mut [u8]) -> Result<usize, FsError> {
+        self.with_file(
+            path,
+            OpenOptions::read_only(),
+            |file| file.read(buffer),
+        )
+    }
 
-        Ok(File {
-            fs: self,
-            id,
-            options,
-            position: if options.append { size } else { 0 },
-            size,
+    pub fn read_file_at(
+        &self,
+        path: &str,
+        offset: u32,
+        buffer: &mut [u8],
+    ) -> Result<usize, FsError> {
+        self.with_file(path, OpenOptions::read_only(), |file| {
+            file.seek(SeekFrom::Start(offset))?;
+            file.read(buffer)
         })
     }
 
-    /// 创建文件
-    pub fn create(&self, path: &str) -> Result<File<'_>, FsError> {
-        self.open(path, OpenOptions::write_only())
+    pub fn write_file(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
+        self.with_file(path, OpenOptions::write_only(), |file| {
+            file.write_all(data)
+        })
     }
 
-    /// 删除文件
-    /// 实现说明
-    /// 当前为占位实现。完整实现应使用littlefs2的remove方法。
+    pub fn append_file(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
+        self.with_file(path, OpenOptions::append_mode(), |file| {
+            file.write_all(data)
+        })
+    }
+
+    pub fn write_file_at(&self, path: &str, offset: u32, data: &[u8]) -> Result<(), FsError> {
+        self.with_file(
+            path,
+            OpenOptions::new().write(true).create(true),
+            |file| {
+                file.seek(SeekFrom::Start(offset))?;
+                file.write_all(data)
+            },
+        )
+    }
+
+    pub fn file_size(&self, path: &str) -> Result<u32, FsError> {
+        self.with_file(path, OpenOptions::read_only(), |file| file.size())
+    }
+
+    pub fn truncate(&self, path: &str, size: u32) -> Result<(), FsError> {
+        self.with_file(
+            path,
+            OpenOptions::new().write(true),
+            |file| file.truncate(size),
+        )
+    }
+
     pub fn remove(&self, path: &str) -> Result<(), FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
-        }
-
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::remove()
-        let _ = path;
-        Ok(())
+        let p = make_path(path)?;
+        self.inner.remove(&p).map_err(FsError::from)
     }
 
-    /// 重命名文件/目录
-    /// 实现说明
-    /// 当前为占位实现。完整实现应使用littlefs2的rename方法。
     pub fn rename(&self, old_path: &str, new_path: &str) -> Result<(), FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
-        }
-
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::rename()
-        let _ = (old_path, new_path);
-        Ok(())
+        let from = make_path(old_path)?;
+        let to = make_path(new_path)?;
+        self.inner.rename(&from, &to).map_err(FsError::from)
     }
 
-    /// 获取文件元数据
-    /// 实现说明
-    /// 当前返回默认值。完整实现应使用littlefs2的stat方法。
     pub fn metadata(&self, path: &str) -> Result<Metadata, FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
-        }
-
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::metadata()
-        let _ = path;
-
+        let p = make_path(path)?;
+        let m = self.inner.metadata(&p).map_err(FsError::from)?;
+        let mut name = heapless::String::<64>::new();
+        let path_str: &str = (*p).as_ref();
+        tail_name(path_str, &mut name)?;
         Ok(Metadata {
-            file_type: FileType::File,
-            size: 0,
-            name: heapless::String::new(),
+            file_type: if m.is_dir() {
+                FileType::Directory
+            } else {
+                FileType::File
+            },
+            size: usize_to_u32(m.len())?,
+            name,
         })
     }
 
-    /// 检查文件是否存在
     pub fn exists(&self, path: &str) -> Result<bool, FsError> {
         match self.metadata(path) {
             Ok(_) => Ok(true),
@@ -624,141 +585,69 @@ impl FileSystem {
         }
     }
 
-    // 目录操作
-
-    /// 创建目录
-    /// 实现说明
-    /// 当前为占位实现。完整实现应使用littlefs2的mkdir方法。
     pub fn create_dir(&self, path: &str) -> Result<(), FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
-        }
-
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::create_dir()
-        let _ = path;
-        Ok(())
+        let p = make_path(path)?;
+        self.inner.create_dir(&p).map_err(FsError::from)
     }
 
-    /// 创建目录(包括父目录)
     pub fn create_dir_all(&self, path: &str) -> Result<(), FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
-        }
-
-        // 逐级创建目录
-        let mut current_path = heapless::String::<256>::new();
-
+        let mut current = heapless::String::<256>::new();
         for component in path.split('/').filter(|s| !s.is_empty()) {
-            current_path.push('/').map_err(|_| FsError::PathTooLong)?;
-            current_path.push_str(component).map_err(|_| FsError::PathTooLong)?;
-
-            match self.create_dir(current_path.as_str()) {
+            current.push('/').map_err(|_| FsError::PathTooLong)?;
+            current.push_str(component).map_err(|_| FsError::PathTooLong)?;
+            match self.create_dir(current.as_str()) {
                 Ok(()) => {}
                 Err(FsError::AlreadyExists) => {}
                 Err(e) => return Err(e),
             }
         }
-
         Ok(())
     }
 
-    /// 删除空目录
     pub fn remove_dir(&self, path: &str) -> Result<(), FsError> {
         self.remove(path)
     }
 
-    /// 打开目录进行遍历
-    /// 实现说明
-    /// 当前为占位实现。完整实现应使用littlefs2的dir_open方法。
-    pub fn read_dir(&self, path: &str) -> Result<Dir<'_>, FsError> {
-        if !self.mounted {
-            return Err(FsError::NotMounted);
+    pub fn read_dir_with<R>(
+        &self,
+        path: &str,
+        f: impl FnOnce(&mut Dir<'_, '_, '_, S>) -> Result<R, FsError>,
+    ) -> Result<R, FsError> {
+        let p = make_path(path)?;
+        let nested: lfsio::Result<Result<R, FsError>> =
+            self.inner
+                .read_dir_and_then(&p, |rd| Ok(f(&mut Dir { inner: rd })));
+        match nested {
+            Ok(Ok(r)) => Ok(r),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(FsError::from(e)),
         }
+    }
 
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::read_dir()
-        let _ = path;
-        let id = self.allocate_dir_id();
-
-        Ok(Dir {
-            fs: self,
-            id,
-            index: 0,
+    pub fn read_dir_collect<const N: usize>(
+        &self,
+        path: &str,
+        out: &mut heapless::Vec<Metadata, N>,
+    ) -> Result<usize, FsError> {
+        out.clear();
+        self.read_dir_with(path, |dir| {
+            for item in dir {
+                out.push(item?).map_err(|_| FsError::Full)?;
+            }
+            Ok(out.len())
         })
     }
 
-    // 内部方法
-
-    fn allocate_file_id(&self) -> u32 {
-        // 简化实现，实际需要原子操作
-        // self.next_file_id.fetch_add(1, Ordering::Relaxed)
-        1
-    }
-
-    fn allocate_dir_id(&self) -> u32 {
-        // 简化实现
-        1
-    }
-
-    fn get_file_size(&self, _path: &str) -> Result<u32, FsError> {
-        // 占位实现 - 完整实现应使用littlefs2::fs::Filesystem::metadata()
-        Ok(0)
-    }
-
-    fn read_file_internal(&self, _id: u32, _offset: u32, buffer: &mut [u8]) -> Result<usize, FsError> {
-        // 占位实现 - 完整实现应使用littlefs2文件读取API
-        Ok(buffer.len())
-    }
-
-    fn write_file_internal(&self, _id: u32, _offset: u32, data: &[u8]) -> Result<usize, FsError> {
-        // 占位实现 - 完整实现应使用littlefs2文件写入API
-        Ok(data.len())
-    }
-
-    fn sync_file_internal(&self, _id: u32) -> Result<(), FsError> {
-        // 占位实现 - 完整实现应使用littlefs2文件同步API
-        self.storage.inner().config(); // 保持对storage的引用
+    pub fn unmount(self) -> Result<(), FsError> {
+        drop(self);
         Ok(())
     }
-
-    fn truncate_file_internal(&self, _id: u32, _size: u32) -> Result<(), FsError> {
-        // 占位实现 - 完整实现应使用littlefs2文件截断API
-        Ok(())
-    }
-
-    fn read_dir_internal(&self, _id: u32, _index: u32) -> Result<Option<Metadata>, FsError> {
-        // 占位实现 - 完整实现应使用littlefs2目录读取API
-        Ok(None)
-    }
 }
 
-impl Drop for FileSystem {
-    fn drop(&mut self) {
-        if self.mounted {
-            let _ = self.unmount();
-        }
-    }
-}
-
-/// 便捷宏: 简化文件读取
-#[macro_export]
-macro_rules! read_file {
-    ($fs:expr, $path:expr) => {{
-        let mut file = $fs.open($path, $crate::fs::OpenOptions::read_only())?;
-        let mut buffer = [0u8; 1024];
-        let size = file.read(&mut buffer)?;
-        &buffer[..size]
-    }};
-}
-
-/// 便捷宏: 简化文件写入
-#[macro_export]
-macro_rules! write_file {
-    ($fs:expr, $path:expr, $data:expr) => {{
-        let mut file = $fs.create($path)?;
-        file.write_all($data)?;
-        file.sync()?;
-    }};
-}
+const _: () = {
+    assert!(LFS_CACHE_SIZE % FLASH_WORD_SIZE as usize == 0);
+    assert!(FLASH_SECTOR_SIZE as usize % LFS_CACHE_SIZE == 0);
+};
 
 #[cfg(test)]
 mod tests {
@@ -766,10 +655,7 @@ mod tests {
 
     #[test]
     fn test_open_options() {
-        let opts = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true);
+        let opts = OpenOptions::new().read(true).write(true).create(true);
 
         assert!(opts.read);
         assert!(opts.write);
@@ -779,14 +665,42 @@ mod tests {
 
     #[test]
     fn test_seek_from() {
-        // 测试SeekFrom枚举
         let start = SeekFrom::Start(100);
         let end = SeekFrom::End(-50);
         let current = SeekFrom::Current(10);
 
-        // 只验证构造
         assert!(matches!(start, SeekFrom::Start(100)));
         assert!(matches!(end, SeekFrom::End(-50)));
         assert!(matches!(current, SeekFrom::Current(10)));
+    }
+
+    #[test]
+    fn test_make_path_validation() {
+        assert!(make_path("/data/log.txt").is_ok());
+        assert_eq!(make_path("").unwrap_err(), FsError::InvalidParam);
+        assert_eq!(
+            make_path("a\0b").unwrap_err(),
+            FsError::InvalidParam
+        );
+        assert_eq!(
+            make_path("中文").unwrap_err(),
+            FsError::InvalidParam
+        );
+        let mut huge = heapless::String::<256>::new();
+        for _ in 0..256 {
+            huge.push('x').unwrap();
+        }
+        assert_eq!(make_path(huge.as_str()).unwrap_err(), FsError::PathTooLong);
+    }
+
+    #[test]
+    fn test_tail_name() {
+        let mut name = heapless::String::<64>::new();
+        tail_name("/data/log.txt", &mut name).unwrap();
+        assert_eq!(name.as_str(), "log.txt");
+
+        let mut root = heapless::String::<64>::new();
+        tail_name("/", &mut root).unwrap();
+        assert_eq!(root.as_str(), "");
     }
 }
