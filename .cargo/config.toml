@@ -34,6 +34,14 @@ DEFMT_LOG = { value = "off", force = true }
 
 # ESP日志级别
 ESP_LOG = "warn"
+# N16R8模组的PSRAM是octal模式;esp-hal默认quad探测不到,必须显式指定
+ESP_HAL_CONFIG_PSRAM_MODE = "octal"
+# cc-rs交叉编译编译器:littlefs2-sys的C代码必须用esp32s3专用wrapper编译
+# (cc-rs默认选xtensa-esp-elf-gcc,该驱动不带-mcpu时产出大端目标文件,链接报错)
+CC_xtensa_esp32s3_none_elf = "xtensa-esp32s3-elf-gcc"
+# C代码需-mlongcalls:否则call8窗口外调用memcpy/memset/compiler_builtins符号
+# 会报"dangerous relocation: call target out of range"
+CFLAGS_xtensa_esp32s3_none_elf = "-mlongcalls"
 
 # 不稳定特性
 [unstable]

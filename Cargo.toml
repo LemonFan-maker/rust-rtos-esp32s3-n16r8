@@ -41,6 +41,8 @@ embedded-hal-async = "1.0"
 # 文件系统
 littlefs2 = "0.4"
 embedded-storage = "0.3"
+# 内部SPI Flash访问
+esp-storage = { version = "0.8.1", features = ["esp32s3"] }
 
 # 网络协议栈
 # WiFi/BLE驱动
@@ -68,15 +70,7 @@ trouble-host = { version = "0.5", default-features = false, optional = true, fea
 ] }
 bt-hci = { version = "0.2", optional = true }
 
-# smoltcp底层(embassy-net已包含，这里用于直接访问)
-smoltcp = { version = "0.12", default-features = false, optional = true, features = [
-    "proto-ipv4",
-    "socket-tcp",
-    "socket-udp",
-    "socket-dns",
-    "socket-dhcpv4",
-    "medium-ethernet",
-] }
+# (smoltcp经embassy-net间接引入,不再作为直接依赖)
 
 [features]
 default = []
@@ -99,7 +93,6 @@ wifi = [
     "esp-radio",
     "esp-radio/wifi",
     "esp-rtos/esp-radio",  # 启用RTOS适配器(esp_rtos_semaphore_* 等)
-    "smoltcp",
 ]
 
 # BLE支持 - 使用trouble-host (默认, 纯Rust实现)
@@ -136,6 +129,10 @@ full-network = [
     "network",
     "ble",
 ]
+
+# 双核支持 - 启用Core1启动路径(start_with_rtos)
+# 注意: 使用esp-rtos的start_second_core,需要软件中断0+1(见tasks::multicore)
+multicore = []
 
 # Profile配置 - 最激进性能优化
 

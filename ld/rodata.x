@@ -1,6 +1,3 @@
-/* Custom rodata section ordering from esp-hal 1.0 to fix App Descriptor placement */
-/* This overrides esp-hal 0.23's rodata.x to place .flash.appdesc FIRST */
-
 SECTIONS {
   /* For ESP App Description, must be placed first in image (PR #4745 fix) */
   .flash.appdesc : ALIGN(4)
