@@ -13,7 +13,10 @@ use esp_println::println;
 
 #[cfg(not(feature = "dev"))]
 macro_rules! println {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 #[cfg(feature = "dev")]
@@ -55,7 +58,7 @@ async fn pool_test_task() {
     }
 
     let elapsed = start.elapsed();
-    println!("Performed {} alloc/free cycles", iterations);
+    println!("Performed {} alloc/free cycles ({} succeeded)", iterations, alloc_count);
     println!("Total time: {} us", elapsed.as_micros());
     println!("Average: {} ns per cycle", elapsed.as_micros() * 1000 / iterations as u64);
 

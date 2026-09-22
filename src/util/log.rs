@@ -64,31 +64,46 @@ macro_rules! log_trace {
 #[cfg(not(any(feature = "dev", feature = "log-defmt", feature = "log-println")))]
 #[macro_export]
 macro_rules! log_info {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 #[cfg(not(any(feature = "dev", feature = "log-defmt", feature = "log-println")))]
 #[macro_export]
 macro_rules! log_debug {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 #[cfg(not(any(feature = "dev", feature = "log-defmt", feature = "log-println")))]
 #[macro_export]
 macro_rules! log_warn {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 #[cfg(not(any(feature = "dev", feature = "log-defmt", feature = "log-println")))]
 #[macro_export]
 macro_rules! log_error {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 #[cfg(not(any(feature = "dev", feature = "log-defmt", feature = "log-println")))]
 #[macro_export]
 macro_rules! log_trace {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 pub use log_info;

@@ -25,6 +25,9 @@ rustflags = [
 
     # 禁用红区(嵌入式必须)
     "-C", "no-redzone=yes",
+
+    # IRAM段(rwtext)天然RWX,这是嵌入式布局固有属性,抑制binutils的RWX段警告
+    "-C", "link-arg=-Wl,--no-warn-rwx-segments",
 ]
 
 # 环境变量
@@ -42,6 +45,11 @@ CC_xtensa_esp32s3_none_elf = "xtensa-esp32s3-elf-gcc"
 # C代码需-mlongcalls:否则call8窗口外调用memcpy/memset/compiler_builtins符号
 # 会报"dangerous relocation: call target out of range"
 CFLAGS_xtensa_esp32s3_none_elf = "-mlongcalls"
+
+# 第三方build-dependency提示控制: bindgen 0.56(littlefs2-sys的build依赖)的future-incompat报告
+# 本项目代码0警告; 根治需升littlefs2主版本,会波及已登记依赖表,故仅关闭该提示
+[future-incompat-report]
+frequency = "never"
 
 # 不稳定特性
 [unstable]

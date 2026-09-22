@@ -41,7 +41,7 @@ where
     critical_section::with(f)
 }
 
-use portable_atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use portable_atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct AtomicFlag {
     flag: AtomicBool,

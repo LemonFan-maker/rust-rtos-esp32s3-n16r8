@@ -15,7 +15,10 @@ use esp_println::println;
 
 #[cfg(not(feature = "dev"))]
 macro_rules! println {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 #[cfg(feature = "dev")]

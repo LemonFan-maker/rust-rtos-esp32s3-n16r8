@@ -1,7 +1,4 @@
 use core::cell::UnsafeCell;
-use core::marker::PhantomData;
-use core::mem::MaybeUninit;
-use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
 

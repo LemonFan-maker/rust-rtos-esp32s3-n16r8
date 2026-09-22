@@ -30,7 +30,7 @@ fn init_heap() {
 
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-            HEAP.as_mut_ptr() as *mut u8,
+            core::ptr::addr_of_mut!(HEAP) as *mut u8,
             HEAP_SIZE,
             esp_alloc::MemoryCapability::Internal.into(),
         ));
@@ -42,7 +42,10 @@ use esp_println::println;
 
 #[cfg(not(feature = "dev"))]
 macro_rules! println {
-    ($($arg:tt)*) => {};
+    ($($arg:tt)*) => {{
+        fn _log_disabled(_: ::core::fmt::Arguments<'_>) {}
+        _log_disabled(::core::format_args!($($arg)*));
+    }};
 }
 
 #[cfg(feature = "dev")]

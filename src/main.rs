@@ -1,11 +1,8 @@
 #![no_std]
 #![no_main]
-#![feature(asm_experimental_arch)]
+#![cfg_attr(all(feature = "defmt", feature = "dev"), feature(asm_experimental_arch))]
 
-mod tasks;
-mod sync;
-mod util;
-mod mem;
+use rustrtos::tasks;
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Timer};
@@ -21,7 +18,7 @@ use portable_atomic::Ordering;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[allow(unused_imports)]
-use crate::util::log::*;
+use rustrtos::util::log::*;
 
 #[cfg(feature = "dev")]
 use esp_backtrace as _;

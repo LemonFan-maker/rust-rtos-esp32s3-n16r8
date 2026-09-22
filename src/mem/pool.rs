@@ -210,7 +210,7 @@ impl<T, const N: usize, const BACKEND: u8> MemoryPool<T, N, BACKEND> {
     }
 
     pub fn alloc_init(&self, value: T) -> Result<PoolBox<'_, T, N, BACKEND>, PoolError> {
-        let mut boxed = self.alloc()?;
+        let boxed = self.alloc()?;
         unsafe {
             boxed.ptr.as_ptr().write(value);
         }
