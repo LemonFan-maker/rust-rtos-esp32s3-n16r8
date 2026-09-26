@@ -7,6 +7,7 @@ pub mod util;
 pub mod mem;
 pub mod fs;
 pub mod ota;
+pub mod perf;
 
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub mod net;
