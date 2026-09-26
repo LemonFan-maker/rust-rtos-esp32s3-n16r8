@@ -8,6 +8,7 @@ pub mod mem;
 pub mod fs;
 pub mod ota;
 pub mod perf;
+pub mod watchdog;
 
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub mod net;
@@ -35,7 +36,7 @@ pub use tasks::multicore::{
 };
 
 pub use fs::{
-    FileSystem, File, OpenOptions, FileType, Metadata,
+    FileSystem, File, OpenOptions, FileType, Metadata, MountPolicy, VolumeState,
     PartitionTable, Partition, PartitionType,
     FlashStorage, StorageError,
 };

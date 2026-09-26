@@ -29,6 +29,24 @@ const WIFI_PASSWORD: &str = "YourPassword";
 const OTA_HOST: &str = "192.168.1.10";
 const OTA_PORT: u16 = 8000;
 const OTA_PATH: &str = "/rustrtos.bin";
+/// 期望镜像SHA-256(十六进制小写)。留空则跳过完整性校验, 仅依赖ESP镜像魔数
+/// 与分区状态机; 生产部署应填写构建流水线对.bin产物计算的摘要。
+const OTA_EXPECTED_SHA256: &str = "";
+
+/// 解析64位十六进制字符串为32字节摘要; 非法输入返回None。
+fn parse_sha256_hex(text: &str) -> Option<[u8; 32]> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 64 {
+        return None;
+    }
+    let mut digest = [0u8; 32];
+    for (slot, pair) in digest.iter_mut().zip(bytes.chunks_exact(2)) {
+        let hi = (pair[0] as char).to_digit(16)?;
+        let lo = (pair[1] as char).to_digit(16)?;
+        *slot = (hi * 16 + lo) as u8;
+    }
+    Some(digest)
+}
 
 const NET_SOCKET_SLOTS: usize = 4;
 
@@ -301,7 +319,15 @@ async fn ota_task(
         park_after_spawn().await;
     }
 
-    let mut ota = match OtaSession::begin(&mut flash, &mut partition_table, image_len) {
+    let expected_digest = parse_sha256_hex(OTA_EXPECTED_SHA256);
+    if !OTA_EXPECTED_SHA256.is_empty() && expected_digest.is_none() {
+        println!("OTA_EXPECTED_SHA256 is not 64 hex digits; aborting");
+        park_after_spawn().await;
+    }
+    let mut ota = match match expected_digest {
+        Some(digest) => OtaSession::begin_verified(&mut flash, &mut partition_table, image_len, digest),
+        None => OtaSession::begin(&mut flash, &mut partition_table, image_len),
+    } {
         Ok(session) => session,
         Err(error) => {
             println!("OTA session init failed: {}", error);

@@ -398,6 +398,28 @@ fn entry_to_metadata(entry: littlefs2::fs::DirEntry) -> Result<Metadata, FsError
     })
 }
 
+/// 卷挂载策略
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MountPolicy {
+    /// 仅尝试挂载; 失败时返回错误, 绝不改动介质内容。
+    MountOnly,
+    /// 挂载失败后探测首个擦除块: 若为全0xFF(从未写入的空白介质)则格式化后挂载;
+    /// 若介质上已存在数据(损坏卷或其他格式残留)则返回`FsError::Corrupt`,
+    /// 避免擦除可能可恢复的数据。
+    FormatIfAbsent,
+    /// 挂载失败即格式化后挂载(破坏性; 仅用于确定可丢弃的介质)。
+    FormatAlways,
+}
+
+/// 卷探测结果(基于首个擦除块内容)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeState {
+    /// 首块全为0xFF: 从未格式化的空白介质
+    Blank,
+    /// 首块存在非0xFF字节: 曾有数据写入
+    Provisioned,
+}
+
 pub struct FileSystem<'a, S: driver::Storage> {
     inner: LfsFilesystem<'a, S>,
 }
@@ -423,20 +445,55 @@ impl<'a, S: driver::Storage> FileSystem<'a, S> {
         Ok(())
     }
 
-    fn probe_mounted(alloc: &mut Allocation<S>, device: &mut S) -> bool {
-        Self::mount(alloc, device).is_ok()
+    /// 探测卷状态: 逐段读取首个擦除块, 遇到非0xFF字节即判定为已写入。
+    pub fn probe_volume(device: &mut S) -> Result<VolumeState, FsError> {
+        let mut chunk = [0u8; 64];
+        let mut offset = 0usize;
+        let block = S::BLOCK_SIZE;
+        while offset < block {
+            let want = chunk.len().min(block - offset);
+            let read = device
+                .read(offset, &mut chunk[..want])
+                .map_err(|_| FsError::MountFailed)?;
+            if read == 0 {
+                return Err(FsError::MountFailed);
+            }
+            if chunk[..read].iter().any(|&b| b != 0xFF) {
+                return Ok(VolumeState::Provisioned);
+            }
+            offset += read;
+        }
+        Ok(VolumeState::Blank)
     }
 
-    pub fn mount_or_format(
-        alloc: &'a mut Allocation<S>,
-        device: &'a mut S,
-    ) -> Result<(Self, bool), FsError> {
-        if Self::probe_mounted(alloc, device) {
-            Ok((Self::mount(alloc, device)?, false))
-        } else {
+    /// 一次试探性挂载: 成功即释放文件系统, 不向调用方泄漏借用。
+    fn try_mount(alloc: &mut Allocation<S>, device: &mut S) -> Result<(), FsError> {
+        Self::mount(alloc, device).map(|_fs| ())
+    }
+
+    /// 按策略挂载文件系统, 返回(文件系统, 是否执行了格式化)。
+    ///
+    /// 先试探挂载; 失败时按`MountPolicy`决定报错、探测后格式化或直接格式化。
+    /// 成功路径含一次试探挂载, 其开销为一次元数据读取。
+    pub fn mount_with<'m>(
+        alloc: &'m mut Allocation<S>,
+        device: &'m mut S,
+        policy: MountPolicy,
+    ) -> Result<(FileSystem<'m, S>, bool), FsError> {
+        if let Err(err) = Self::try_mount(alloc, device) {
+            match policy {
+                MountPolicy::MountOnly => return Err(err),
+                MountPolicy::FormatAlways => {}
+                MountPolicy::FormatIfAbsent => match Self::probe_volume(device) {
+                    Ok(VolumeState::Blank) => {}
+                    Ok(VolumeState::Provisioned) => return Err(FsError::Corrupt),
+                    Err(probe_err) => return Err(probe_err),
+                },
+            }
             Self::format(device)?;
-            Ok((Self::mount(alloc, device)?, true))
+            return Ok((Self::mount(alloc, device)?, true));
         }
+        Ok((Self::mount(alloc, device)?, false))
     }
 
     pub fn total_blocks(&self) -> u32 {

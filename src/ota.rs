@@ -5,6 +5,7 @@ use esp_bootloader_esp_idf::ota_updater::OtaUpdater;
 use esp_bootloader_esp_idf::partitions::{
     AppPartitionSubType, Error as PartitionError, PARTITION_TABLE_MAX_LEN,
 };
+use sha2::{Digest as _, Sha256};
 
 pub const OTA_WRITE_SIZE: usize = 4;
 pub const OTA_ERASE_SIZE: usize = 4096;
@@ -19,6 +20,7 @@ pub enum OtaError {
     NotComplete,
     TargetChanged,
     CapacityOverflow,
+    DigestMismatch,
 }
 
 impl fmt::Display for OtaError {
@@ -31,6 +33,7 @@ impl fmt::Display for OtaError {
             Self::NotComplete => write!(f, "OTA image is incomplete"),
             Self::CapacityOverflow => write!(f, "OTA erase range exceeds the partition capacity"),
             Self::TargetChanged => write!(f, "OTA target slot changed during update"),
+            Self::DigestMismatch => write!(f, "image SHA-256 does not match the expected digest"),
         }
     }
 }
@@ -63,6 +66,8 @@ where
     written: usize,
     pending: [u8; OTA_WRITE_SIZE],
     pending_len: usize,
+    hasher: Option<Sha256>,
+    expected_digest: Option<[u8; 32]>,
 }
 
 impl<'a, F> OtaSession<'a, F>
@@ -98,7 +103,24 @@ where
             written: 0,
             pending: [0; OTA_WRITE_SIZE],
             pending_len: 0,
+            hasher: None,
+            expected_digest: None,
         })
+    }
+
+    /// 以完整性校验模式开始会话: `push`逐块流式计算SHA-256,
+    /// `finish`在与`expected_digest`一致前不会激活新分区。
+    /// 摘要建议由构建流水线对`.bin`产物计算后随镜像一同分发。
+    pub fn begin_verified(
+        flash: &'a mut F,
+        partition_table: &'a mut [u8; PARTITION_TABLE_MAX_LEN],
+        image_len: usize,
+        expected_digest: [u8; 32],
+    ) -> Result<Self, OtaError> {
+        let mut session = Self::begin(flash, partition_table, image_len)?;
+        session.hasher = Some(Sha256::new());
+        session.expected_digest = Some(expected_digest);
+        Ok(session)
     }
 
     pub fn target_slot(&self) -> AppPartitionSubType {
@@ -134,6 +156,9 @@ where
         if next_received > self.image_len {
             return Err(OtaError::InvalidImageLength);
         }
+        if let Some(hasher) = self.hasher.as_mut() {
+            hasher.update(bytes);
+        }
 
         for byte in bytes {
             self.pending[self.pending_len] = *byte;
@@ -153,6 +178,17 @@ where
     pub fn finish(mut self) -> Result<OtaUpdate, OtaError> {
         if self.received != self.image_len || self.pending_len != 0 {
             return Err(OtaError::NotComplete);
+        }
+        if let (Some(hasher), Some(expected)) = (self.hasher.take(), self.expected_digest) {
+            let actual = hasher.finalize();
+            // 逐字节或运算比较, 不提前短路
+            let mut diff = 0u8;
+            for (a, b) in actual.iter().zip(expected.iter()) {
+                diff |= a ^ b;
+            }
+            if diff != 0 {
+                return Err(OtaError::DigestMismatch);
+            }
         }
 
         self.updater.activate_next_partition()?;

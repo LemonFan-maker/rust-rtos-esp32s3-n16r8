@@ -79,7 +79,7 @@ async fn fs_demo_task(flash_periph: esp_hal::peripherals::FLASH<'static>) {
 
     println!("flash storage");
 
-    use rustrtos::fs::{FileSystem, FlashConfig, FlashStorage, LfsDevice, OpenOptions, SeekFrom};
+    use rustrtos::fs::{FileSystem, FlashConfig, FlashStorage, LfsDevice, MountPolicy, OpenOptions, SeekFrom};
 
     let config = FlashConfig {
         partition_offset: 0xC00000,
@@ -105,7 +105,11 @@ async fn fs_demo_task(flash_periph: esp_hal::peripherals::FLASH<'static>) {
     println!("littlefs mount");
 
     let mut alloc = FileSystem::allocate();
-    let (fs, _formatted) = match FileSystem::mount_or_format(&mut alloc, &mut device) {
+    let (fs, _formatted) = match FileSystem::mount_with(
+        &mut alloc,
+        &mut device,
+        MountPolicy::FormatIfAbsent,
+    ) {
         Ok((fs, formatted)) => {
             println!("mount OK (formatted_now={})", formatted);
             (fs, formatted)
