@@ -30,6 +30,10 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 static CORE0_COUNTER: AtomicU32 = AtomicU32::new(0);
 static CORE1_COUNTER: AtomicU32 = AtomicU32::new(0);
+static IPC_CHANNEL: rustrtos::tasks::multicore::IpcChannel<u32, 8> =
+    rustrtos::tasks::multicore::IpcChannel::new();
+static IPC_SIGNAL: rustrtos::tasks::multicore::IpcSignal =
+    rustrtos::tasks::multicore::IpcSignal::new();
 
 #[embassy_executor::task]
 async fn core0_task() {
@@ -62,35 +66,43 @@ async fn monitor_task() {
 }
 
 #[embassy_executor::task]
-async fn ipc_demo_task() {
-    println!("IPC demo task started");
+async fn ipc_receiver_task() {
+    println!("IPC receiver running on Core0");
+    let mut received = 0u32;
 
-    use rustrtos::tasks::multicore::{IpcChannel, IpcSignal};
+    while received < 5 {
+        if let Some(value) = IPC_CHANNEL.try_recv() {
+            println!("Core0 received {} from Core1", value);
+            received += 1;
+        }
 
-    static IPC_CHANNEL: IpcChannel<u32, 8> = IpcChannel::new();
-    static IPC_SIGNAL: IpcSignal = IpcSignal::new();
+        if IPC_SIGNAL.try_wait() {
+            println!("Core0 consumed IPC signal");
+        }
 
-    for i in 0..5 {
-        if IPC_CHANNEL.try_send(i).is_ok() {
-            println!("Sent {} to IPC channel", i);
+        Timer::after(Duration::from_millis(10)).await;
+    }
+
+    println!("Cross-core IPC verified: received {} messages", received);
+}
+
+#[cfg(not(feature = "multicore"))]
+#[embassy_executor::task]
+async fn simulated_ipc_producer_task() {
+    println!("IPC producer simulated on Core0");
+    for value in 0..5u32 {
+        loop {
+            match IPC_CHANNEL.try_send(value) {
+                Ok(()) => {
+                    IPC_SIGNAL.signal();
+                    println!("Core0 simulated producer sent {}", value);
+                    break;
+                }
+                Err(_) => Timer::after(Duration::from_millis(10)).await,
+            }
         }
         Timer::after(Duration::from_millis(500)).await;
     }
-
-    println!("Receiving from IPC channel:");
-    while let Some(value) = IPC_CHANNEL.try_recv() {
-        println!("Received: {}", value);
-    }
-
-    println!("Testing IPC signal:");
-    IPC_SIGNAL.signal();
-    println!("Signal sent");
-
-    if IPC_SIGNAL.check_and_clear() {
-        println!("Signal received and cleared");
-    }
-
-    println!("IPC demo complete!");
 }
 
 #[esp_rtos::main]
@@ -105,11 +117,6 @@ async fn main(spawner: Spawner) {
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
-
-    spawner.spawn(core0_task()).ok();
-    spawner.spawn(monitor_task()).ok();
-    spawner.spawn(ipc_demo_task()).ok();
-
     #[cfg(feature = "multicore")]
     {
         use esp_hal::interrupt::software::SoftwareInterruptControl;
@@ -129,19 +136,27 @@ async fn main(spawner: Spawner) {
             || {
                 println!("Core1 entry running on APP_CPU");
                 let handle = esp_rtos::CurrentThreadHandle::get();
+                let mut next_message = 0u32;
                 loop {
                     CORE1_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    if next_message < 5 && IPC_CHANNEL.try_send(next_message).is_ok() {
+                        IPC_SIGNAL.signal();
+                        println!("Core1 sent {} to Core0", next_message);
+                        next_message += 1;
+                    }
                     handle.delay(esp_hal::time::Duration::from_millis(200));
                 }
             },
         );
         Core1::wait_ready();
         println!("Core1 scheduler ready");
-
-        loop {
-            Timer::after(Duration::from_secs(10)).await;
-        }
     }
+
+    spawner.spawn(core0_task()).ok();
+    spawner.spawn(monitor_task()).ok();
+    spawner.spawn(ipc_receiver_task()).ok();
+    #[cfg(not(feature = "multicore"))]
+    spawner.spawn(simulated_ipc_producer_task()).ok();
 
     #[cfg(not(feature = "multicore"))]
     loop {

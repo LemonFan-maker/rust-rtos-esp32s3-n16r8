@@ -1,0 +1,437 @@
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x400490d5
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fce2820,len:0x14d0
+load:0x403c8700,len:0xdcc
+load:0x403cb700,len:0x2f54
+entry 0x403c8900
+I (27) boot: ESP-IDF v6.1-beta1-497-g14f663f003e 2nd stage bootloader
+I (27) boot: Multicore bootloader
+I (27) boot: chip revision: v0.2
+I (28) boot: efuse block revision: v1.3
+I (31) boot.esp32s3: Boot SPI Speed : 40MHz
+I (35) boot.esp32s3: SPI Mode       : DIO
+I (39) boot.esp32s3: SPI Flash Size : 16MB
+I (43) boot: Enabling RNG early entropy source...
+I (47) boot: Partition Table:
+I (50) boot: ## Label            Usage          Type ST Offset   Length
+I (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (63) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (69) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (76) boot:  3 factory          factory app      00 00 00020000 003e0000
+I (82) boot:  4 ota_0            OTA app          00 10 00400000 00400000
+I (89) boot:  5 ota_1            OTA app          00 11 00800000 00400000
+I (95) boot:  6 storage          Unknown data     01 83 00c00000 00400000
+I (102) boot: End of partition table
+I (105) boot: Defaulting to factory image
+I (109) esp_image: segment 0: paddr=00020020 vaddr=3c000020 size=0f880h ( 63616) map
+I (132) esp_image: segment 1: paddr=0002f8a8 vaddr=3fc930d8 size=00770h (  1904) load
+I (133) esp_image: segment 2: paddr=00030020 vaddr=42010020 size=60300h (393984) map
+I (235) esp_image: segment 3: paddr=00090328 vaddr=3fc93848 size=028a8h ( 10408) load
+I (239) esp_image: segment 4: paddr=00092bd8 vaddr=40378000 size=0b0d8h ( 45272) load
+I (258) boot: Loaded app from partition at offset 0x20000
+I (258) boot: Disabling RNG early entropy source...
+OTA update task started
+OTA network ready at 192.168.1.166
+No pending OTA confirmation
+OTA progress: 2876/515296 bytes
+OTA progress: 4314/515296 bytes
+OTA progress: 5752/515296 bytes
+OTA progress: 7190/515296 bytes
+OTA progress: 8628/515296 bytes
+OTA progress: 10066/515296 bytes
+OTA progress: 11504/515296 bytes
+OTA progress: 12942/515296 bytes
+OTA progress: 14380/515296 bytes
+OTA progress: 15818/515296 bytes
+OTA progress: 17256/515296 bytes
+OTA progress: 18694/515296 bytes
+OTA progress: 20132/515296 bytes
+OTA progress: 21570/515296 bytes
+OTA progress: 23008/515296 bytes
+OTA progress: 24446/515296 bytes
+OTA progress: 25884/515296 bytes
+OTA progress: 27322/515296 bytes
+OTA progress: 28760/515296 bytes
+OTA progress: 30198/515296 bytes
+OTA progress: 31636/515296 bytes
+OTA progress: 33074/515296 bytes
+OTA progress: 34512/515296 bytes
+OTA progress: 35950/515296 bytes
+OTA progress: 37388/515296 bytes
+OTA progress: 38826/515296 bytes
+OTA progress: 40264/515296 bytes
+OTA progress: 41702/515296 bytes
+OTA progress: 43140/515296 bytes
+OTA progress: 44578/515296 bytes
+OTA progress: 46016/515296 bytes
+OTA progress: 47454/515296 bytes
+OTA progress: 48892/515296 bytes
+OTA progress: 50330/515296 bytes
+OTA progress: 51768/515296 bytes
+OTA progress: 53206/515296 bytes
+OTA progress: 54644/515296 bytes
+OTA progress: 56082/515296 bytes
+OTA progress: 57520/515296 bytes
+OTA progress: 58958/515296 bytes
+OTA progress: 60396/515296 bytes
+OTA progress: 61834/515296 bytes
+OTA progress: 63272/515296 bytes
+OTA progress: 64710/515296 bytes
+OTA progress: 66148/515296 bytes
+OTA progress: 67586/515296 bytes
+OTA progress: 69024/515296 bytes
+OTA progress: 70462/515296 bytes
+OTA progress: 71900/515296 bytes
+OTA progress: 73338/515296 bytes
+OTA progress: 74776/515296 bytes
+OTA progress: 76214/515296 bytes
+OTA progress: 77652/515296 bytes
+OTA progress: 79090/515296 bytes
+OTA progress: 80528/515296 bytes
+OTA progress: 81966/515296 bytes
+OTA progress: 83404/515296 bytes
+OTA progress: 84842/515296 bytes
+OTA progress: 86280/515296 bytes
+OTA progress: 87718/515296 bytes
+OTA progress: 89156/515296 bytes
+OTA progress: 90594/515296 bytes
+OTA progress: 92032/515296 bytes
+OTA progress: 93470/515296 bytes
+OTA progress: 94908/515296 bytes
+OTA progress: 96346/515296 bytes
+OTA progress: 97784/515296 bytes
+OTA progress: 99222/515296 bytes
+OTA progress: 100660/515296 bytes
+OTA progress: 102098/515296 bytes
+OTA progress: 103536/515296 bytes
+OTA progress: 104974/515296 bytes
+OTA progress: 106412/515296 bytes
+OTA progress: 107850/515296 bytes
+OTA progress: 109288/515296 bytes
+OTA progress: 110726/515296 bytes
+OTA progress: 112164/515296 bytes
+OTA progress: 113602/515296 bytes
+OTA progress: 115040/515296 bytes
+OTA progress: 116478/515296 bytes
+OTA progress: 117916/515296 bytes
+OTA progress: 119354/515296 bytes
+OTA progress: 120792/515296 bytes
+OTA progress: 122230/515296 bytes
+OTA progress: 123668/515296 bytes
+OTA progress: 125106/515296 bytes
+OTA progress: 126544/515296 bytes
+OTA progress: 127982/515296 bytes
+OTA progress: 129420/515296 bytes
+OTA progress: 130858/515296 bytes
+OTA progress: 132296/515296 bytes
+OTA progress: 133734/515296 bytes
+OTA progress: 135172/515296 bytes
+OTA progress: 136610/515296 bytes
+OTA progress: 138048/515296 bytes
+OTA progress: 139486/515296 bytes
+OTA progress: 140924/515296 bytes
+OTA progress: 142362/515296 bytes
+OTA progress: 143800/515296 bytes
+OTA progress: 145238/515296 bytes
+OTA progress: 146676/515296 bytes
+OTA progress: 148114/515296 bytes
+OTA progress: 149552/515296 bytes
+OTA progress: 150990/515296 bytes
+OTA progress: 152428/515296 bytes
+OTA progress: 153866/515296 bytes
+OTA progress: 155304/515296 bytes
+OTA progress: 156742/515296 bytes
+OTA progress: 158180/515296 bytes
+OTA progress: 159618/515296 bytes
+OTA progress: 161056/515296 bytes
+OTA progress: 162494/515296 bytes
+OTA progress: 163932/515296 bytes
+OTA progress: 165370/515296 bytes
+OTA progress: 166808/515296 bytes
+OTA progress: 168246/515296 bytes
+OTA progress: 169684/515296 bytes
+OTA progress: 171122/515296 bytes
+OTA progress: 172560/515296 bytes
+OTA progress: 173998/515296 bytes
+OTA progress: 175436/515296 bytes
+OTA progress: 176874/515296 bytes
+OTA progress: 178312/515296 bytes
+OTA progress: 179750/515296 bytes
+OTA progress: 181188/515296 bytes
+OTA progress: 182626/515296 bytes
+OTA progress: 184064/515296 bytes
+OTA progress: 185502/515296 bytes
+OTA progress: 186940/515296 bytes
+OTA progress: 188378/515296 bytes
+OTA progress: 189816/515296 bytes
+OTA progress: 191254/515296 bytes
+OTA progress: 192692/515296 bytes
+OTA progress: 194130/515296 bytes
+OTA progress: 195568/515296 bytes
+OTA progress: 197006/515296 bytes
+OTA progress: 198444/515296 bytes
+OTA progress: 199882/515296 bytes
+OTA progress: 201320/515296 bytes
+OTA progress: 202758/515296 bytes
+OTA progress: 204196/515296 bytes
+OTA progress: 205634/515296 bytes
+OTA progress: 207072/515296 bytes
+OTA progress: 208510/515296 bytes
+OTA progress: 209948/515296 bytes
+OTA progress: 211386/515296 bytes
+OTA progress: 212824/515296 bytes
+OTA progress: 214262/515296 bytes
+OTA progress: 215700/515296 bytes
+OTA progress: 217138/515296 bytes
+OTA progress: 218576/515296 bytes
+OTA progress: 220014/515296 bytes
+OTA progress: 221452/515296 bytes
+OTA progress: 222890/515296 bytes
+OTA progress: 224328/515296 bytes
+OTA progress: 225766/515296 bytes
+OTA progress: 227204/515296 bytes
+OTA progress: 228642/515296 bytes
+OTA progress: 230080/515296 bytes
+OTA progress: 231518/515296 bytes
+OTA progress: 232956/515296 bytes
+OTA progress: 234394/515296 bytes
+OTA progress: 235832/515296 bytes
+OTA progress: 237270/515296 bytes
+OTA progress: 238708/515296 bytes
+OTA progress: 240146/515296 bytes
+OTA progress: 241584/515296 bytes
+OTA progress: 243022/515296 bytes
+OTA progress: 244460/515296 bytes
+OTA progress: 245898/515296 bytes
+OTA progress: 247336/515296 bytes
+OTA progress: 248774/515296 bytes
+OTA progress: 250212/515296 bytes
+OTA progress: 251650/515296 bytes
+OTA progress: 253088/515296 bytes
+OTA progress: 254526/515296 bytes
+OTA progress: 255964/515296 bytes
+OTA progress: 257402/515296 bytes
+OTA progress: 258840/515296 bytes
+OTA progress: 260278/515296 bytes
+OTA progress: 261716/515296 bytes
+OTA progress: 263154/515296 bytes
+OTA progress: 264592/515296 bytes
+OTA progress: 266030/515296 bytes
+OTA progress: 267468/515296 bytes
+OTA progress: 268906/515296 bytes
+OTA progress: 270344/515296 bytes
+OTA progress: 271782/515296 bytes
+OTA progress: 273220/515296 bytes
+OTA progress: 274658/515296 bytes
+OTA progress: 276096/515296 bytes
+OTA progress: 277534/515296 bytes
+OTA progress: 278972/515296 bytes
+OTA progress: 280410/515296 bytes
+OTA progress: 281848/515296 bytes
+OTA progress: 283286/515296 bytes
+OTA progress: 284724/515296 bytes
+OTA progress: 286162/515296 bytes
+OTA progress: 287600/515296 bytes
+OTA progress: 289038/515296 bytes
+OTA progress: 290476/515296 bytes
+OTA progress: 291914/515296 bytes
+OTA progress: 293352/515296 bytes
+OTA progress: 294790/515296 bytes
+OTA progress: 296228/515296 bytes
+OTA progress: 297666/515296 bytes
+OTA progress: 299104/515296 bytes
+OTA progress: 300542/515296 bytes
+OTA progress: 301980/515296 bytes
+OTA progress: 303418/515296 bytes
+OTA progress: 304856/515296 bytes
+OTA progress: 306294/515296 bytes
+OTA progress: 307732/515296 bytes
+OTA progress: 309170/515296 bytes
+OTA progress: 310608/515296 bytes
+OTA progress: 312046/515296 bytes
+OTA progress: 313484/515296 bytes
+OTA progress: 314922/515296 bytes
+OTA progress: 316360/515296 bytes
+OTA progress: 317798/515296 bytes
+OTA progress: 319236/515296 bytes
+OTA progress: 320674/515296 bytes
+OTA progress: 322112/515296 bytes
+OTA progress: 323550/515296 bytes
+OTA progress: 324988/515296 bytes
+OTA progress: 326426/515296 bytes
+OTA progress: 327864/515296 bytes
+OTA progress: 329302/515296 bytes
+OTA progress: 330740/515296 bytes
+OTA progress: 332178/515296 bytes
+OTA progress: 333616/515296 bytes
+OTA progress: 335054/515296 bytes
+OTA progress: 336492/515296 bytes
+OTA progress: 337930/515296 bytes
+OTA progress: 339368/515296 bytes
+OTA progress: 340806/515296 bytes
+OTA progress: 342244/515296 bytes
+OTA progress: 343682/515296 bytes
+OTA progress: 345120/515296 bytes
+OTA progress: 346558/515296 bytes
+OTA progress: 347996/515296 bytes
+OTA progress: 349434/515296 bytes
+OTA progress: 350872/515296 bytes
+OTA progress: 352310/515296 bytes
+OTA progress: 353748/515296 bytes
+OTA progress: 355186/515296 bytes
+OTA progress: 356624/515296 bytes
+OTA progress: 358062/515296 bytes
+OTA progress: 359500/515296 bytes
+OTA progress: 360938/515296 bytes
+OTA progress: 362376/515296 bytes
+OTA progress: 363814/515296 bytes
+OTA progress: 365252/515296 bytes
+OTA progress: 366690/515296 bytes
+OTA progress: 368128/515296 bytes
+OTA progress: 369566/515296 bytes
+OTA progress: 371004/515296 bytes
+OTA progress: 372442/515296 bytes
+OTA progress: 373880/515296 bytes
+OTA progress: 375318/515296 bytes
+OTA progress: 376756/515296 bytes
+OTA progress: 378194/515296 bytes
+OTA progress: 379632/515296 bytes
+OTA progress: 381070/515296 bytes
+OTA progress: 382508/515296 bytes
+OTA progress: 383946/515296 bytes
+OTA progress: 385384/515296 bytes
+OTA progress: 386822/515296 bytes
+OTA progress: 388260/515296 bytes
+OTA progress: 389698/515296 bytes
+OTA progress: 391136/515296 bytes
+OTA progress: 392574/515296 bytes
+OTA progress: 394012/515296 bytes
+OTA progress: 395450/515296 bytes
+OTA progress: 396888/515296 bytes
+OTA progress: 398326/515296 bytes
+OTA progress: 399764/515296 bytes
+OTA progress: 401202/515296 bytes
+OTA progress: 402640/515296 bytes
+OTA progress: 404078/515296 bytes
+OTA progress: 405516/515296 bytes
+OTA progress: 406954/515296 bytes
+OTA progress: 408392/515296 bytes
+OTA progress: 409830/515296 bytes
+OTA progress: 411268/515296 bytes
+OTA progress: 412706/515296 bytes
+OTA progress: 414144/515296 bytes
+OTA progress: 415582/515296 bytes
+OTA progress: 417020/515296 bytes
+OTA progress: 418458/515296 bytes
+OTA progress: 419896/515296 bytes
+OTA progress: 421334/515296 bytes
+OTA progress: 422772/515296 bytes
+OTA progress: 424210/515296 bytes
+OTA progress: 425648/515296 bytes
+OTA progress: 427086/515296 bytes
+OTA progress: 428524/515296 bytes
+OTA progress: 429962/515296 bytes
+OTA progress: 431400/515296 bytes
+OTA progress: 432838/515296 bytes
+OTA progress: 434276/515296 bytes
+OTA progress: 435714/515296 bytes
+OTA progress: 437152/515296 bytes
+OTA progress: 438590/515296 bytes
+OTA progress: 440028/515296 bytes
+OTA progress: 441466/515296 bytes
+OTA progress: 442904/515296 bytes
+OTA progress: 444342/515296 bytes
+OTA progress: 445780/515296 bytes
+OTA progress: 447218/515296 bytes
+OTA progress: 448656/515296 bytes
+OTA progress: 450094/515296 bytes
+OTA progress: 451532/515296 bytes
+OTA progress: 452970/515296 bytes
+OTA progress: 454408/515296 bytes
+OTA progress: 455846/515296 bytes
+OTA progress: 457284/515296 bytes
+OTA progress: 458722/515296 bytes
+OTA progress: 460160/515296 bytes
+OTA progress: 461598/515296 bytes
+OTA progress: 463036/515296 bytes
+OTA progress: 464474/515296 bytes
+OTA progress: 465912/515296 bytes
+OTA progress: 467350/515296 bytes
+OTA progress: 468788/515296 bytes
+OTA progress: 470226/515296 bytes
+OTA progress: 471664/515296 bytes
+OTA progress: 473102/515296 bytes
+OTA progress: 474540/515296 bytes
+OTA progress: 475978/515296 bytes
+OTA progress: 477416/515296 bytes
+OTA progress: 478854/515296 bytes
+OTA progress: 480292/515296 bytes
+OTA progress: 481730/515296 bytes
+OTA progress: 483168/515296 bytes
+OTA progress: 484606/515296 bytes
+OTA progress: 486044/515296 bytes
+OTA progress: 487482/515296 bytes
+OTA progress: 488920/515296 bytes
+OTA progress: 490358/515296 bytes
+OTA progress: 491796/515296 bytes
+OTA progress: 493234/515296 bytes
+OTA progress: 494672/515296 bytes
+OTA progress: 496110/515296 bytes
+OTA progress: 497548/515296 bytes
+OTA progress: 498986/515296 bytes
+OTA progress: 500424/515296 bytes
+OTA progress: 501862/515296 bytes
+OTA progress: 503300/515296 bytes
+OTA progress: 504738/515296 bytes
+OTA progress: 506176/515296 bytes
+OTA progress: 507614/515296 bytes
+OTA progress: 509052/515296 bytes
+OTA progress: 510490/515296 bytes
+OTA progress: 511928/515296 bytes
+OTA progress: 513366/515296 bytes
+OTA progress: 515296/515296 bytes
+OTA image written to Ota0 (515296 bytes); rebooting
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40378998
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fce2820,len:0x14d0
+load:0x403c8700,len:0xdcc
+load:0x403cb700,len:0x2f54
+entry 0x403c8900
+I (26) boot: ESP-IDF v6.1-beta1-497-g14f663f003e 2nd stage bootloader
+I (26) boot: Multicore bootloader
+I (27) boot: chip revision: v0.2
+I (27) boot: efuse block revision: v1.3
+I (31) boot.esp32s3: Boot SPI Speed : 40MHz
+I (35) boot.esp32s3: SPI Mode       : DIO
+I (38) boot.esp32s3: SPI Flash Size : 16MB
+I (42) boot: Enabling RNG early entropy source...
+I (47) boot: Partition Table:
+I (49) boot: ## Label            Usage          Type ST Offset   Length
+I (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (62) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (69) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (75) boot:  3 factory          factory app      00 00 00020000 003e0000
+I (82) boot:  4 ota_0            OTA app          00 10 00400000 00400000
+I (88) boot:  5 ota_1            OTA app          00 11 00800000 00400000
+I (95) boot:  6 storage          Unknown data     01 83 00c00000 00400000
+I (101) boot: End of partition table
+I (105) esp_image: segment 0: paddr=00400020 vaddr=3c000020 size=0f880h ( 63616) map
+I (128) esp_image: segment 1: paddr=0040f8a8 vaddr=3fc930d8 size=00770h (  1904) load
+I (129) esp_image: segment 2: paddr=00410020 vaddr=42010020 size=60300h (393984) map
+I (231) esp_image: segment 3: paddr=00470328 vaddr=3fc93848 size=028a8h ( 10408) load
+I (234) esp_image: segment 4: paddr=00472bd8 vaddr=40378000 size=0b0d8h ( 45272) load
+I (253) boot: Loaded app from partition at offset 0x400000
+I (253) boot: Disabling RNG early entropy source...
+OTA update task started
+OTA network ready at 192.168.1.166
+No pending OTA confirmation
+No OTA update available for version 0.2.0
+OTA task halted (keeping WiFi/net_task alive).

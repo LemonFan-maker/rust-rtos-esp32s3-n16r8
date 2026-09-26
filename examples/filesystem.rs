@@ -53,8 +53,8 @@ async fn fs_demo_task(flash_periph: esp_hal::peripherals::FLASH<'static>) {
         "storage",
         PartitionType::Data,
         DataSubType::LittleFs.as_u8(),
-        0x110000,
-        0xF00000,
+        0xC00000,
+        0x400000,
     );
 
     println!("Created partition table with {} partitions:", table.len());
@@ -82,7 +82,8 @@ async fn fs_demo_task(flash_periph: esp_hal::peripherals::FLASH<'static>) {
     use rustrtos::fs::{FileSystem, FlashConfig, FlashStorage, LfsDevice, OpenOptions, SeekFrom};
 
     let config = FlashConfig {
-        partition_size: (LFS_BLOCK_COUNT as u32) * 4096,
+        partition_offset: 0xC00000,
+        partition_size: 0x400000,
         ..FlashConfig::default()
     };
     println!(

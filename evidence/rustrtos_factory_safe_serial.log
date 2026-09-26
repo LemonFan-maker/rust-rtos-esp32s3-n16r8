@@ -1,0 +1,39 @@
+I (97) boot:  6 storage          Unknown data     01 83 00c00000ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4206efe6
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fce2820,len:0x14f0
+load:0x403c8700,len:0xde4
+load:0x403cb700,len:0x2fa0
+entry 0x403c8904
+I (27) boot: ESP-IDF v6.1 2nd stage bootloader
+I (27) boot: compile time Sep 25 2026 14:28:22
+I (27) boot: Multicore bootloader
+I (28) boot: chip revision: v0.2
+I (30) boot: efuse block revision: v1.3
+I (34) boot.esp32s3: Boot SPI Speed : 40MHz
+I (37) boot.esp32s3: SPI Mode       : DIO
+I (41) boot.esp32s3: SPI Flash Size : 16MB
+I (45) boot: Enabling RNG early entropy source...
+I (50) boot: Partition Table:
+I (52) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (65) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (71) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (78) boot:  3 factory          factory app      00 00 00020000 003e0000
+I (84) boot:  4 ota_0            OTA app          00 10 00400000 00400000
+I (91) boot:  5 ota_1            OTA app          00 11 00800000 00400000
+I (97) boot:  6 storage          Unknown data     01 83 00c00000 00400000
+I (104) boot: End of partition table
+I (107) boot: Defaulting to factory image
+I (111) esp_image: segment 0: paddr=00020020 vaddr=3c000020 size=0f880h ( 63616) map
+I (135) esp_image: segment 1: paddr=0002f8a8 vaddr=3fc930d8 size=00770h (  1904) load
+I (136) esp_image: segment 2: paddr=00030020 vaddr=42010020 size=60300h (393984) map
+I (238) esp_image: segment 3: paddr=00090328 vaddr=3fc93848 size=028a8h ( 10408) load
+I (241) esp_image: segment 4: paddr=00092bd8 vaddr=40378000 size=0b0d8h ( 45272) load
+I (260) boot: Loaded app from partition at offset 0x20000
+I (260) boot: Disabling RNG early entropy source...
+OTA update task started
+WiFi connection failed

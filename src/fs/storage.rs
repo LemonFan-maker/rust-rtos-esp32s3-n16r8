@@ -73,13 +73,23 @@ impl Default for FlashConfig {
             sector_size: FLASH_SECTOR_SIZE,
             block_size: FLASH_SECTOR_SIZE,
             page_size: FLASH_WORD_SIZE,
-            partition_offset: 0x410000,
-            partition_size: 0xBF0000,
+            partition_offset: 0xC00000,
+            partition_size: 0x400000,
         }
     }
 }
 
 impl FlashConfig {
+    pub const fn whole_flash() -> Self {
+        Self {
+            total_size: 0,
+            sector_size: FLASH_SECTOR_SIZE,
+            block_size: FLASH_SECTOR_SIZE,
+            page_size: FLASH_WORD_SIZE,
+            partition_offset: 0,
+            partition_size: 0,
+        }
+    }
     pub fn absolute(&self, offset: u32, len: usize) -> Result<u32, StorageError> {
         let end = offset as u64 + len as u64;
         if end > self.partition_size as u64 {
@@ -122,8 +132,12 @@ impl<'d> FlashStorage<'d> {
     }
 
     pub fn init(&mut self) -> Result<(), StorageError> {
-        let capacity = self.esp.capacity() as u32;
+        let capacity = ReadNorFlash::capacity(&self.esp) as u32;
         self.config.total_size = capacity;
+
+        if self.config.partition_size == 0 {
+            self.config.partition_size = capacity;
+        }
 
         if self.config.partition_offset as u64 + self.config.partition_size as u64
             > capacity as u64
@@ -154,7 +168,7 @@ impl<'d> FlashStorage<'d> {
     }
 
     pub fn capacity(&self) -> u32 {
-        self.esp.capacity() as u32
+        ReadNorFlash::capacity(&self.esp) as u32
     }
 
     pub fn block_count(&self) -> u32 {
@@ -179,8 +193,7 @@ impl<'d> FlashStorage<'d> {
             return Err(StorageError::AlignmentError);
         }
         let addr = self.config.absolute(offset, buffer.len())?;
-        self.esp
-            .read(addr, buffer)
+        ReadNorFlash::read(&mut self.esp, addr, buffer)
             .map_err(|e| map_esp_error(e, StorageError::ReadError))
     }
 
@@ -190,8 +203,7 @@ impl<'d> FlashStorage<'d> {
             return Err(StorageError::AlignmentError);
         }
         let addr = self.config.absolute(offset, data.len())?;
-        self.esp
-            .write(addr, data)
+        NorFlash::write(&mut self.esp, addr, data)
             .map_err(|e| map_esp_error(e, StorageError::WriteError))
     }
 
@@ -201,8 +213,7 @@ impl<'d> FlashStorage<'d> {
             return Err(StorageError::AlignmentError);
         }
         let addr = self.config.absolute(offset, len as usize)?;
-        self.esp
-            .erase(addr, addr + len)
+        NorFlash::erase(&mut self.esp, addr, addr + len)
             .map_err(|e| map_esp_error(e, StorageError::EraseError))
     }
 
@@ -243,6 +254,67 @@ impl<'d> FlashStorage<'d> {
     }
 }
 
+impl embedded_storage::nor_flash::NorFlashError for StorageError {
+    fn kind(&self) -> embedded_storage::nor_flash::NorFlashErrorKind {
+        match self {
+            StorageError::AlignmentError => {
+                embedded_storage::nor_flash::NorFlashErrorKind::NotAligned
+            }
+            StorageError::OutOfBounds => embedded_storage::nor_flash::NorFlashErrorKind::OutOfBounds,
+            _ => embedded_storage::nor_flash::NorFlashErrorKind::Other,
+        }
+    }
+}
+
+impl embedded_storage::ReadStorage for FlashStorage<'_> {
+    type Error = StorageError;
+
+    fn read(&mut self, offset: u32, buffer: &mut [u8]) -> Result<(), Self::Error> {
+        FlashStorage::read(self, offset, buffer)
+    }
+
+    fn capacity(&self) -> usize {
+        self.config.partition_size as usize
+    }
+}
+
+impl embedded_storage::Storage for FlashStorage<'_> {
+    fn write(&mut self, offset: u32, data: &[u8]) -> Result<(), Self::Error> {
+        FlashStorage::write(self, offset, data)
+    }
+}
+
+impl embedded_storage::nor_flash::ErrorType for FlashStorage<'_> {
+    type Error = StorageError;
+}
+
+impl embedded_storage::nor_flash::ReadNorFlash for FlashStorage<'_> {
+    const READ_SIZE: usize = FLASH_WORD_SIZE as usize;
+
+    fn read(&mut self, offset: u32, buffer: &mut [u8]) -> Result<(), Self::Error> {
+        FlashStorage::read(self, offset, buffer)
+    }
+
+    fn capacity(&self) -> usize {
+        self.config.partition_size as usize
+    }
+}
+
+impl embedded_storage::nor_flash::NorFlash for FlashStorage<'_> {
+    const WRITE_SIZE: usize = FLASH_WORD_SIZE as usize;
+    const ERASE_SIZE: usize = FLASH_SECTOR_SIZE as usize;
+
+    fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+        if to < from {
+            return Err(StorageError::OutOfBounds);
+        }
+        FlashStorage::erase(self, from, to - from)
+    }
+
+    fn write(&mut self, offset: u32, data: &[u8]) -> Result<(), Self::Error> {
+        FlashStorage::write(self, offset, data)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -76,7 +76,7 @@ async fn net_task(
 
 // net_task(runner) 一旦 spawn 就永久存活并持有 embassy-net 的 iface;
 // 若本任务提前 return,局部 wifi_ctrl 被 drop 触发 esp-radio wifi_deinit,
-// runner 后续 dispatch 会访问已释放驱动(实测 LoadProhibited@esp_wifi_internal_tx)。
+// runner 后续 dispatch 会访问已释放驱动并可能触发LoadProhibited@esp_wifi_internal_tx。
 // 因此 spawn 之后的所有失败出口必须 park 而非 return。
 async fn park_after_spawn() -> ! {
     println!("TCP client demo halted (keeping WiFi/net_task alive).");

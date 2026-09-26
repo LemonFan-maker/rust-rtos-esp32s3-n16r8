@@ -224,6 +224,10 @@ path = "examples/filesystem.rs"
 name = "benchmark_memory"
 path = "examples/benchmark_memory.rs"
 [[example]]
+name = "ota_update"
+path = "examples/ota_update.rs"
+required-features = ["network", "dev"]
+[[example]]
 name = "wifi_scan"
 path = "examples/wifi_scan.rs"
 required-features = ["wifi", "dev"]

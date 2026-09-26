@@ -1,11 +1,11 @@
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
 use esp_hal::system::Cpu;
 #[cfg(feature = "multicore")]
 use esp_hal::system::Stack;
-use heapless::spsc::Queue;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreId {
@@ -142,42 +142,80 @@ impl Core1 {
     }
 }
 
+/// A single-producer/single-consumer lock-free channel suitable for Core0/Core1 IPC.
+///
+/// The producer and consumer must each have exactly one caller. Ownership of `T` crosses
+/// the cores through the release/acquire publication of the head and tail counters.
 pub struct IpcChannel<T, const N: usize> {
-    queue: UnsafeCell<Queue<T, N>>,
+    buffer: UnsafeCell<[MaybeUninit<T>; N]>,
+    head: AtomicUsize,
+    tail: AtomicUsize,
     _marker: PhantomData<T>,
 }
 
 impl<T, const N: usize> IpcChannel<T, N> {
     pub const fn new() -> Self {
+        assert!(N > 0, "IPC channel capacity must be greater than zero");
         Self {
-            queue: UnsafeCell::new(Queue::new()),
+            buffer: UnsafeCell::new(unsafe {
+                MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init()
+            }),
+            head: AtomicUsize::new(0),
+            tail: AtomicUsize::new(0),
             _marker: PhantomData,
         }
     }
 
     pub fn try_send(&self, value: T) -> Result<(), T> {
-        let queue = unsafe { &mut *self.queue.get() };
-        queue.enqueue(value)
+        let head = self.head.load(Ordering::Relaxed);
+        let tail = self.tail.load(Ordering::Acquire);
+        if head.wrapping_sub(tail) >= N {
+            return Err(value);
+        }
+
+        unsafe {
+            self.buffer
+                .get()
+                .cast::<MaybeUninit<T>>()
+                .add(head % N)
+                .write(MaybeUninit::new(value));
+        }
+        self.head.store(head.wrapping_add(1), Ordering::Release);
+        Ok(())
     }
 
     pub fn try_recv(&self) -> Option<T> {
-        let queue = unsafe { &mut *self.queue.get() };
-        queue.dequeue()
+        let tail = self.tail.load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Acquire);
+        if tail == head {
+            return None;
+        }
+
+        let value = unsafe {
+            self.buffer
+                .get()
+                .cast::<MaybeUninit<T>>()
+                .add(tail % N)
+                .read()
+                .assume_init()
+        };
+        self.tail.store(tail.wrapping_add(1), Ordering::Release);
+        Some(value)
     }
 
     pub fn is_empty(&self) -> bool {
-        let queue = unsafe { &*self.queue.get() };
-        queue.is_empty()
+        self.len() == 0
     }
 
     pub fn is_full(&self) -> bool {
-        let queue = unsafe { &*self.queue.get() };
-        queue.is_full()
+        self.len() >= N
     }
 
     pub fn len(&self) -> usize {
-        let queue = unsafe { &*self.queue.get() };
-        queue.len()
+        self.head
+            .load(Ordering::Acquire)
+            .wrapping_sub(self.tail.load(Ordering::Acquire))
+            .min(N)
     }
 
     pub const fn capacity(&self) -> usize {

@@ -1,0 +1,182 @@
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40048df3
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fce2820,len:0x14f0
+load:0x403c8700,len:0xde4
+load:0x403cb700,len:0x2fa0
+entry 0x403c8904
+I (27) boot: ESP-IDF v6.1 2nd stage bootloader
+I (27) boot: compile time Sep 25 2026 14:28:22
+I (27) boot: Multicore bootloader
+I (28) boot: chip revision: v0.2
+I (30) boot: efuse block revision: v1.3
+I (34) boot.esp32s3: Boot SPI Speed : 40MHz
+I (37) boot.esp32s3: SPI Mode       : DIO
+I (41) boot.esp32s3: SPI Flash Size : 16MB
+I (45) boot: Enabling RNG early entropy source...
+I (50) boot: Partition Table:
+I (52) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (65) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (71) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (78) boot:  3 factory          factory app      00 00 00020000 003e0000
+I (84) boot:  4 ota_0            OTA app          00 10 00400000 00400000
+I (91) boot:  5 ota_1            OTA app          00 11 00800000 00400000
+I (97) boot:  6 storage          Unknown data     01 83 00c00000 00400000
+I (104) boot: End of partition table
+I (132) esp_image: segment 0: paddr=00400020 vaddr=3c000020 size=0f880h ( 63616) map
+I (149) esp_image: segment 1: paddr=0040f8a8 vaddr=3fc930d8 size=00770h (  1904) load
+I (150) esp_image: segment 2: paddr=00410020 vaddr=42010020 size=60300h (393984) map
+I (252) esp_image: segment 3: paddr=00470328 vaddr=3fc93848 size=028a8h ( 10408) load
+I (255) esp_image: segment 4: paddr=00472bd8 vaddr=40378000 size=0b0d8h ( 45272) load
+I (274) boot: Loaded app from partition at offset 0x400000
+I (274) boot: Disabling RNG early entropy source...
+OTA update task started
+OTA network ready at 192.168.1.166
+Confirmed the pending OTA image after WiFi/DHCP self-check
+OTA progress: 2876/92528 bytes
+OTA progress: 4314/92528 bytes
+OTA progress: 5752/92528 bytes
+OTA progress: 7190/92528 bytes
+OTA progress: 8628/92528 bytes
+OTA progress: 10066/92528 bytes
+OTA progress: 11504/92528 bytes
+OTA progress: 12942/92528 bytes
+OTA progress: 14380/92528 bytes
+OTA progress: 15818/92528 bytes
+OTA progress: 17256/92528 bytes
+OTA progress: 18694/92528 bytes
+OTA progress: 20132/92528 bytes
+OTA progress: 21570/92528 bytes
+OTA progress: 23008/92528 bytes
+OTA progress: 24446/92528 bytes
+OTA progress: 25884/92528 bytes
+OTA progress: 27322/92528 bytes
+OTA progress: 28760/92528 bytes
+OTA progress: 30198/92528 bytes
+OTA progress: 31636/92528 bytes
+OTA progress: 33074/92528 bytes
+OTA progress: 34512/92528 bytes
+OTA progress: 35950/92528 bytes
+OTA progress: 37388/92528 bytes
+OTA progress: 38826/92528 bytes
+OTA progress: 40264/92528 bytes
+OTA progress: 41702/92528 bytes
+OTA progress: 43140/92528 bytes
+OTA progress: 44578/92528 bytes
+OTA progress: 46016/92528 bytes
+OTA progress: 47454/92528 bytes
+OTA progress: 48892/92528 bytes
+OTA progress: 50330/92528 bytes
+OTA progress: 51768/92528 bytes
+OTA progress: 53206/92528 bytes
+OTA progress: 54644/92528 bytes
+OTA progress: 56082/92528 bytes
+OTA progress: 57520/92528 bytes
+OTA progress: 58958/92528 bytes
+OTA progress: 60396/92528 bytes
+OTA progress: 61834/92528 bytes
+OTA progress: 63272/92528 bytes
+OTA progress: 64710/92528 bytes
+OTA progress: 66148/92528 bytes
+OTA progress: 67586/92528 bytes
+OTA progress: 69024/92528 bytes
+OTA progress: 70462/92528 bytes
+OTA progress: 71900/92528 bytes
+OTA progress: 73338/92528 bytes
+OTA progress: 74776/92528 bytes
+OTA progress: 76214/92528 bytes
+OTA progress: 77652/92528 bytes
+OTA progress: 79090/92528 bytes
+OTA progress: 80528/92528 bytes
+OTA progress: 81966/92528 bytes
+OTA progress: 83404/92528 bytes
+OTA progress: 84842/92528 bytes
+OTA progress: 86280/92528 bytes
+OTA progress: 87718/92528 bytes
+OTA progress: 89156/92528 bytes
+OTA progress: 90594/92528 bytes
+OTA progress: 92528/92528 bytes
+OTA image written to Ota1 (92528 bytes); rebooting
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40378998
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fce2820,len:0x14f0
+load:0x403c8700,len:0xde4
+load:0x403cb700,len:0x2fa0
+entry 0x403c8904
+I (26) boot: ESP-IDF v6.1 2nd stage bootloader
+I (26) boot: compile time Sep 25 2026 14:28:22
+I (27) boot: Multicore bootloader
+I (27) boot: chip revision: v0.2
+I (29) boot: efuse block revision: v1.3
+I (33) boot.esp32s3: Boot SPI Speed : 40MHz
+I (37) boot.esp32s3: SPI Mode       : DIO
+I (41) boot.esp32s3: SPI Flash Size : 16MB
+I (44) boot: Enabling RNG early entropy source...
+I (49) boot: Partition Table:
+I (52) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (64) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (71) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (77) boot:  3 factory          factory app      00 00 00020000 003e0000
+I (84) boot:  4 ota_0            OTA app          00 10 00400000 00400000
+I (90) boot:  5 ota_1            OTA app          00 11 00800000 00400000
+I (97) boot:  6 storage          Unknown data     01 83 00c00000 00400000
+I (104) boot: End of partition table
+I (131) esp_image: segment 0: paddr=00800020 vaddr=3c000020 size=01e64h (  7780) map
+I (133) esp_image: segment 1: paddr=00801e8c vaddr=3fc8ae48 size=00c20h (  3104) load
+I (136) esp_image: segment 2: paddr=00802ab4 vaddr=40378000 size=02e48h ( 11848) load
+I (146) esp_image: segment 3: paddr=00805904 vaddr=00000000 size=0a714h ( 42772) 
+I (160) esp_image: segment 4: paddr=00810020 vaddr=42010020 size=06920h ( 26912) map
+I (169) boot: Loaded app from partition at offset 0x800000
+I (169) boot: Disabling RNG early entropy source...
+OTA_ROLLBACK_PROBE_START_WITHOUT_CONFIRM
+OTA_ROLLBACK_PROBE_RESET_WITHOUT_CONFIRM
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40378930
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x3fce2820,len:0x14f0
+load:0x403c8700,len:0xde4
+load:0x403cb700,len:0x2fa0
+entry 0x403c8904
+I (26) boot: ESP-IDF v6.1 2nd stage bootloader
+I (26) boot: compile time Sep 25 2026 14:28:22
+I (27) boot: Multicore bootloader
+I (27) boot: chip revision: v0.2
+I (29) boot: efuse block revision: v1.3
+I (33) boot.esp32s3: Boot SPI Speed : 40MHz
+I (37) boot.esp32s3: SPI Mode       : DIO
+I (41) boot.esp32s3: SPI Flash Size : 16MB
+I (44) boot: Enabling RNG early entropy source...
+I (49) boot: Partition Table:
+I (52) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (64) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (71) boot:  2 otadata          OTA data         01 00 00010000 00002000
+I (77) boot:  3 factory          factory app      00 00 00020000 003e0000
+I (84) boot:  4 ota_0            OTA app          00 10 00400000 00400000
+I (90) boot:  5 ota_1            OTA app          00 11 00800000 00400000
+I (97) boot:  6 storage          Unknown data     01 83 00c00000 00400000
+I (104) boot: End of partition table
+I (156) esp_image: segment 0: paddr=00400020 vaddr=3c000020 size=0f880h ( 63616) map
+I (172) esp_image: segment 1: paddr=0040f8a8 vaddr=3fc930d8 size=00770h (  1904) load
+I (173) esp_image: segment 2: paddr=00410020 vaddr=42010020 size=60300h (393984) map
+I (275) esp_image: segment 3: paddr=00470328 vaddr=3fc93848 size=028a8h ( 10408) load
+I (279) esp_image: segment 4: paddr=00472bd8 vaddr=40378000 size=0b0d8h ( 45272) load
+I (297) boot: Loaded app from partition at offset 0x400000
+I (298) boot: Disabling RNG early entropy source...
+OTA update task started
+OTA network ready at 192.168.1.166
+No pending OTA confirmation
+No OTA update available for version 0.2.0
+OTA task halted (keeping WiFi/net_task alive).

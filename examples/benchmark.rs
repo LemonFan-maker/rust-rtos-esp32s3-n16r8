@@ -28,7 +28,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
-static TASK_SWITCHES: AtomicU32 = AtomicU32::new(0);
+static YIELD_ITERATIONS: AtomicU32 = AtomicU32::new(0);
 
 const SPAWN_TEST_N: usize = 64;
 static SPAWN_DONE: AtomicU32 = AtomicU32::new(0);
@@ -43,23 +43,23 @@ async fn one_shot_arrival(start: Instant) {
 }
 
 #[embassy_executor::task]
-async fn measure_task_switch() {
-    println!("Starting task switch benchmark...");
+async fn measure_yield_loop() {
+    println!("Starting yield-loop measurement...");
 
     let iterations = 10000;
     let start = Instant::now();
 
     for _ in 0..iterations {
         embassy_futures::yield_now().await;
-        TASK_SWITCHES.fetch_add(1, Ordering::Relaxed);
+        YIELD_ITERATIONS.fetch_add(1, Ordering::Relaxed);
     }
 
     let elapsed = start.elapsed();
-    let ns_per_switch = elapsed.as_micros() * 1000 / iterations as u64;
+    let ns_per_iteration = elapsed.as_micros() * 1000 / iterations as u64;
 
-    println!("Task switch benchmark complete:");
+    println!("Yield-loop measurement complete:");
     println!("{} iterations in {} ms", iterations, elapsed.as_millis());
-    println!("Average: {} ns per switch", ns_per_switch);
+    println!("Average: {} ns per iteration (includes atomic counter update)", ns_per_iteration);
 }
 
 #[embassy_executor::task]
@@ -92,7 +92,7 @@ async fn reporter_task() {
     Timer::after(Duration::from_secs(10)).await;
 
     println!("Benchmark Summary");
-    println!("Total task switches: {}", TASK_SWITCHES.load(Ordering::Relaxed));
+    println!("Total yield-loop iterations: {}", YIELD_ITERATIONS.load(Ordering::Relaxed));
 }
 
 #[esp_rtos::main]
@@ -115,7 +115,7 @@ async fn main(spawner: Spawner) {
     let avg_ns = total_ns / SPAWN_TEST_N as u64;
     println!("Task spawn latency: {} ns avg (N={})", avg_ns, SPAWN_TEST_N);
 
-    spawner.spawn(measure_task_switch()).ok();
+    spawner.spawn(measure_yield_loop()).ok();
     spawner.spawn(measure_timer_precision()).ok();
     spawner.spawn(reporter_task()).ok();
 

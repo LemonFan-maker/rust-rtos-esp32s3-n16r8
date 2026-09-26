@@ -6,6 +6,7 @@ pub mod sync;
 pub mod util;
 pub mod mem;
 pub mod fs;
+pub mod ota;
 
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub mod net;
@@ -36,6 +37,7 @@ pub use fs::{
     PartitionTable, Partition, PartitionType,
     FlashStorage, StorageError,
 };
+pub use ota::{mark_current_valid, validate_image_header, OtaError, OtaSession, OtaUpdate};
 
 #[cfg(feature = "wifi")]
 pub use net::wifi::{WifiController, WifiMode, WifiEvent, WifiError, WifiState, ScanResult};

@@ -370,16 +370,16 @@ pub mod presets {
             0x10000, 0x2000).ok();
 
         table.add_partition("factory", PartitionType::App, AppSubType::Factory.as_u8(),
-            0x12000, 0x400000).ok();
+            0x20000, 0x3E0000).ok();
 
         table.add_partition("ota_0", PartitionType::App, 0x10,
-            0x412000, 0x400000).ok();
+            0x400000, 0x400000).ok();
 
         table.add_partition("ota_1", PartitionType::App, 0x11,
-            0x812000, 0x400000).ok();
+            0x800000, 0x400000).ok();
 
         table.add_partition("storage", PartitionType::Data, DataSubType::LittleFs.as_u8(),
-            0xC12000, 0x3EE000).ok();
+            0xC00000, 0x400000).ok();
 
         table
     }

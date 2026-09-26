@@ -7,12 +7,8 @@ use core::sync::atomic::Ordering;
 use portable_atomic::AtomicU64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
 pub enum Backend {
-    Dram = 0,
-    PsramCached = 1,
-    PsramDirect = 2,
-    Auto = 3,
+    Dram,
 }
 
 impl Default for Backend {
@@ -180,18 +176,15 @@ pub struct MemoryPool<T, const N: usize, const BACKEND: u8> {
 
 impl<T, const N: usize, const BACKEND: u8> MemoryPool<T, N, BACKEND> {
     pub const fn new() -> Self {
-        assert!(N <= 256, "Pool size must be <= 256");
-
+        assert!(N > 0 && N <= 256, "pool capacity must be between 1 and 256");
         Self {
             slots: UnsafeCell::new(unsafe { MaybeUninit::uninit().assume_init() }),
             bitmap: BitmapLarge::new(),
             _marker: PhantomData,
         }
     }
-
-    pub fn alloc(&self) -> Result<PoolBox<'_, T, N, BACKEND>, PoolError> {
+    fn reserve_slot(&self) -> Result<(usize, NonNull<T>), PoolError> {
         let index = self.bitmap.alloc().ok_or(PoolError::PoolFull)?;
-
         if index >= N {
             let _ = self.bitmap.free(index);
             return Err(PoolError::PoolFull);
@@ -201,20 +194,28 @@ impl<T, const N: usize, const BACKEND: u8> MemoryPool<T, N, BACKEND> {
             let slots = &mut *self.slots.get();
             slots[index].as_mut_ptr()
         };
-
-        Ok(PoolBox {
-            ptr: unsafe { NonNull::new_unchecked(slot_ptr) },
-            index,
-            pool: self,
-        })
+        Ok((index, unsafe { NonNull::new_unchecked(slot_ptr) }))
     }
 
+    fn boxed(&self, index: usize, ptr: NonNull<T>) -> PoolBox<'_, T, N, BACKEND> {
+        PoolBox { ptr, index, pool: self }
+    }
+
+    /// Allocate a slot initialized with `T::default()`.
+    pub fn alloc(&self) -> Result<PoolBox<'_, T, N, BACKEND>, PoolError>
+    where
+        T: Default,
+    {
+        let (index, ptr) = self.reserve_slot()?;
+        unsafe { ptr.as_ptr().write(T::default()) };
+        Ok(self.boxed(index, ptr))
+    }
+
+    /// Allocate and initialize a slot with the provided value.
     pub fn alloc_init(&self, value: T) -> Result<PoolBox<'_, T, N, BACKEND>, PoolError> {
-        let boxed = self.alloc()?;
-        unsafe {
-            boxed.ptr.as_ptr().write(value);
-        }
-        Ok(boxed)
+        let (index, ptr) = self.reserve_slot()?;
+        unsafe { ptr.as_ptr().write(value) };
+        Ok(self.boxed(index, ptr))
     }
 
     pub fn allocated_count(&self) -> usize {
@@ -238,12 +239,7 @@ impl<T, const N: usize, const BACKEND: u8> MemoryPool<T, N, BACKEND> {
     }
 
     pub const fn backend(&self) -> Backend {
-        match BACKEND {
-            0 => Backend::Dram,
-            1 => Backend::PsramCached,
-            2 => Backend::PsramDirect,
-            _ => Backend::Auto,
-        }
+        Backend::Dram
     }
 
     fn release(&self, index: usize) {
@@ -325,7 +321,6 @@ impl<T, const N: usize, const BACKEND: u8> MemoryPool<T, N, BACKEND> {
 }
 
 pub type DramPool<T, const N: usize> = MemoryPool<T, N, { Backend::Dram as u8 }>;
-pub type PsramPool<T, const N: usize> = MemoryPool<T, N, { Backend::PsramCached as u8 }>;
 
 #[cfg(test)]
 mod tests {
