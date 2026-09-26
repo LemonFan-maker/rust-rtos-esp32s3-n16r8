@@ -46,7 +46,8 @@ pub fn cpu_freq_hz() -> u32 {
     }
     #[cfg(not(target_arch = "xtensa"))]
     {
-        crate::config::CPU_FREQ_HZ
+        // 主机侧仅用于单元测试; 频率换算一律使用显式传入的freq_hz参数
+        0
     }
 }
 

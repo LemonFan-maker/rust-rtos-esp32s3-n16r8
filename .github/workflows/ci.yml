@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  host-tests:
+    name: 主机单元测试(纯逻辑模块)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run host unit tests
+        # 必须cd进入host-tests: 其.cargo/config.toml覆盖仓库根的xtensa目标配置;
+        # RUSTUP_TOOLCHAIN绕过根rust-toolchain.toml的esp通道
+        run: cd host-tests && RUSTUP_TOOLCHAIN=stable cargo test
+  build:
+    name: ESP32-S3构建矩阵 (${{ matrix.features == '' && '默认' || matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["", "dev", "dev,network", "dev,ble", "dev,multicore", "log-defmt", "log-println", "dev,log-defmt"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust for Xtensa
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: false
+      - name: Build (dev profile)
+        run: |
+          if [ -z "${{ matrix.features }}" ]; then
+            cargo build --lib --bins --examples
+          else
+            cargo build --lib --bins --examples --features "${{ matrix.features }}"
+          fi
+      - name: Build (release-size profile, 代表性组合)
+        if: matrix.features == 'dev' || matrix.features == 'dev,network'
+        run: cargo build --profile release-size --lib --bins --examples --features "${{ matrix.features }}"

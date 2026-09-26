@@ -134,10 +134,12 @@ impl<const N: usize> Supervisor<N> {
 }
 
 /// RWDT看门狗句柄。
+#[cfg(target_arch = "xtensa")]
 pub struct Watchdog {
     rwdt: esp_hal::rtc_cntl::Rwdt,
 }
 
+#[cfg(target_arch = "xtensa")]
 impl Watchdog {
     /// 启用RWDT并设定Stage0超时(ms)。
     pub fn enable(lpwr: esp_hal::peripherals::LPWR<'static>, timeout_ms: u64) -> Self {
@@ -167,6 +169,7 @@ impl Watchdog {
 /// 监督喂狗一步: 全部受监督任务存活才喂狗。
 /// 返回true表示已喂狗; 返回false表示存在卡死任务, 本次未喂狗,
 /// 若持续false直至RWDT超时则系统复位。
+#[cfg(target_arch = "xtensa")]
 pub fn supervised_feed<const N: usize>(
     wdt: &mut Watchdog,
     supervisor: &Supervisor<N>,

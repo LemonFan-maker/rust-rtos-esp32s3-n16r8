@@ -1,0 +1,4 @@
+# 覆盖仓库根目录的xtensa构建配置: 本crate在主机(x86_64)上编译运行单元测试。
+# cargo配置就近合并, 子目录的[build].target优先于父目录。
+[build]
+target = "x86_64-unknown-linux-gnu"

@@ -1,0 +1,12 @@
+# 主机侧单元测试crate: 把仓库中"纯逻辑"模块(ringbuffer/perf/watchdog)
+# 以#[path]方式纳入一个可在x86上编译测试的包, 使CI无需QEMU即可运行
+# 这些模块的单元与压力测试。本包不发布、不作为固件构建的一部分。
+[package]
+name = "rustrtos-host-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+portable-atomic = "1.11"
+embassy-time = { version = "0.4", features = ["std"] }
