@@ -233,6 +233,12 @@ required-features = ["network", "dev"]
 name = "latency_probe"
 path = "examples/latency_probe.rs"
 [[example]]
+name = "gdma_mem2mem"
+path = "examples/gdma_mem2mem.rs"
+[[example]]
+name = "watchdog_supervised"
+path = "examples/watchdog_supervised.rs"
+[[example]]
 name = "wifi_scan"
 path = "examples/wifi_scan.rs"
 required-features = ["wifi", "dev"]

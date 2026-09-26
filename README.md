@@ -8,11 +8,12 @@
 - **多优先级**: 三级执行器（高Priority3 / 中Priority2软件中断执行器 + Core0主执行器）
 - **定频采样节拍**: `Ticker`按绝对期限对齐，超期丢弃补发不累积漂移
 - **编译期优化**: fat LTO、单codegen-unit、`#[ram]`放置关键代码
-- **无锁同步**: Signal / Channel / RingBuffer（原子操作；RingBuffer切片读取在该API调用处不复制载荷）
+- **无锁同步**: Signal / Channel / RingBuffer（原子操作；环形缓冲读写经begin_write/begin_read返回的RAII守卫，提交/消费由守卫作用域管理）
 - **条件日志**: esp-println文本日志与defmt二进制日志可切换；未启用日志特性时日志宏不产生串口/RTT输出
-- **静态内存**: 固定容量内存池（DRAM）、PSRAM链表分配器、DMA缓冲区对齐与缓存同步辅助
-- **片上Flash存储**: 分区表 + LittleFS文件系统适配层
-- **网络**: WiFi扫描/连接、embassy-net TCP/UDP/DHCP/DNS、BLE（trouble-host）、HTTP OTA升级
+- **静态内存**: 固定容量内存池（DRAM）、PSRAM first-fit分配器、DmaBuffer对齐与prepare_tx/prepare_rx缓存维护生命周期、GDMA内存到内存拷贝通道
+- **片上Flash存储**: 分区表 + LittleFS文件系统适配层，挂载策略可选（MountPolicy: MountOnly / FormatIfAbsent / FormatAlways）
+- **网络**: WiFi扫描/连接、embassy-net TCP/UDP/DHCP/DNS、BLE（trouble-host）、HTTP OTA升级（支持SHA-256摘要校验）
+- **可观测与可靠性**: perf模块周期级延迟统计（CPU周期计数）、watchdog模块RDT看门狗与任务心跳监督（Supervisor/Heartbeat/supervised_feed）
 
 功能边界由编译特性与示例程序决定；性能与稳定性受目标硬件、feature组合和运行环境影响。
 
@@ -97,7 +98,7 @@ cargo espflash flash --example dual_core --features dev,multicore --monitor
 
 ## 示例程序
 
-`examples/`目录共16个示例，名称与`required-features`以`Cargo.toml`为准：
+`examples/`目录共19个示例，名称与`required-features`以`Cargo.toml`为准：
 
 | 示例 | 强制特性 | 内容 |
 |------|----------|------|
@@ -106,17 +107,20 @@ cargo espflash flash --example dual_core --features dev,multicore --monitor
 | `dual_core` | 无（需multicore才跨核） | Core1启动与IpcChannel/IpcSignal消息传递 |
 | `memory_pool` | 无（dev可选） | 固定容量内存池分配、池满失败与复用 |
 | `psram_demo` | 无（dev可选） | PSRAM初始化、统计与大数组分配 |
-| `dma_transfer` | 无（dev可选） | DmaBuffer布局、对齐与缓存同步辅助 |
-| `filesystem` | 无（dev可选） | LittleFS挂载/读写/目录/清理（会擦写Flash窗口） |
+| `dma_transfer` | 无（dev可选） | DmaBuffer缓存维护生命周期（TX回写/RX作废，CPU侧演示） |
+| `gdma_mem2mem` | 无（dev可选） | GDMA内存到内存4KB拷贝与CPU memcpy周期对照 |
+| `filesystem` | 无（dev可选） | LittleFS挂载策略/读写/目录/清理（会擦写Flash窗口） |
 | `wifi_scan` | wifi,dev | AP扫描与RSSI表 |
 | `wifi_connect` | network,dev | STA连接与DHCP |
 | `tcp_client` | network,dev | HTTP GET与TCP收发 |
 | `ble_advertise` | ble,dev | BLE广播 |
 | `ble_gatt_server` | ble,dev | GATT服务与通知 |
 | `benchmark` | 无（dev可选） | 任务spawn延迟、yield路径、定时器精度 |
+| `latency_probe` | 无（dev可选） | 周期级延迟统计：spawn/唤醒/tick/池分配/环形缓冲min-avg-max |
+| `watchdog_supervised` | 无（dev可选） | 任务心跳监督与RDT看门狗联动喂狗 |
 | `benchmark_memory` | 无（dev可选） | 内存池操作耗时 |
 | `benchmark_network` | network,dev | TCP吞吐与时延（需远端TCP服务） |
-| `ota_update` | network,dev | HTTP下载镜像写入OTA槽并切换启动槽 |
+| `ota_update` | network,dev | HTTP下载镜像写入OTA槽并切换启动槽（可选SHA-256摘要校验） |
 
 ## 项目结构
 
@@ -138,12 +142,15 @@ rustrtos/
 │   ├── sync/
 │   │   ├── primitives.rs # 同步原语(Signal/Channel/Mutex)
 │   │   └── ringbuffer.rs # 无锁环形缓冲区
-│   ├── mem/              # pool.rs(内存池) / psram.rs / dma.rs
+│   ├── mem/              # pool.rs(内存池) / psram.rs / dma.rs / gdma.rs
 │   ├── fs/               # partition.rs / storage.rs / littlefs.rs
 │   ├── net/              # wifi.rs / tcp.rs / ble.rs / config.rs(条件编译)
-│   ├── ota.rs            # OTA槽位切换、镜像头校验与确认状态
+│   ├── perf.rs           # 周期级延迟统计(CPU周期计数)
+│   ├── watchdog.rs       # RDT看门狗与任务心跳监督
+│   ├── ota.rs            # OTA槽位切换、镜像头校验、SHA-256摘要与会话状态
 │   └── util/log.rs       # 条件编译日志
-└── examples/             # 16个示例(见上表)
+├── host-tests/           # 主机侧单元测试crate(#[path]纳入纯逻辑模块, x86直接cargo test)
+└── examples/             # 19个示例(见上表)
 ```
 
 ## 软件中断分配
@@ -185,9 +192,19 @@ cargo espflash flash --example ota_update --features network,dev \
 使用限制：
 
 - ESP32-S3仅支持2.4GHz Wi-Fi，配置的SSID须工作在2.4GHz频段；
-- 示例使用明文HTTP，仅校验ESP镜像起始magic字节，不含TLS、签名或来源认证，只适用于可信隔离网络；
+- 示例使用明文HTTP，校验ESP镜像起始magic字节，并可经`OTA_EXPECTED_SHA256`对镜像做SHA-256完整性校验（`OtaSession::begin_verified`，摘要一致前不激活新分区）；不含TLS、签名或来源认证，只适用于可信隔离网络；
 - 自动回滚需要自行编译并启用`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`的ESP-IDF第二阶段引导程序，且重新烧写时须注意`cargo espflash flash`可能覆盖0x0处的引导程序；
 - `--erase-parts otadata`会清除启动槽选择记录，执行前须确认设备内容可清除。
+
+## 测试与CI
+
+`host-tests/`为独立主机crate，以`#[path]`纳入`ringbuffer`/`perf`/`watchdog`三个无esp-hal依赖的纯逻辑模块，在x86主机直接运行单元测试（无需QEMU或硬件）：
+
+```bash
+cd host-tests && RUSTUP_TOOLCHAIN=stable cargo test
+```
+
+`.github/workflows/ci.yml`在push/PR时运行主机单元测试与ESP32-S3构建矩阵（8个feature组合的dev全量构建，及dev、dev,network组合的release-size构建）。
 
 ## License
 
