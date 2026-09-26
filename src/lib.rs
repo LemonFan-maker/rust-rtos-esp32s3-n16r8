@@ -2,6 +2,7 @@
 #![feature(asm_experimental_arch)]
 
 pub mod tasks;
+pub mod apps;
 pub mod sync;
 pub mod util;
 pub mod mem;
@@ -9,6 +10,7 @@ pub mod fs;
 pub mod ota;
 pub mod perf;
 pub mod watchdog;
+pub mod runtime;
 
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub mod net;
@@ -53,6 +55,7 @@ pub use net::tcp::{TcpClient, TcpServer, UdpSocket, NetworkStack, NetworkError};
 
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub use net::config::NetworkConfig;
+pub use runtime::Runtime;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const NAME: &str = env!("CARGO_PKG_NAME");

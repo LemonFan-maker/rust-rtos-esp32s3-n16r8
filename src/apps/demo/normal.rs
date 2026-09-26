@@ -1,11 +1,11 @@
-use embassy_time::{Duration, Instant, Timer, Ticker};
 use embassy_futures::select::{select, Either};
+use embassy_time::{Duration, Instant, Ticker, Timer};
 use esp_hal::gpio::Output;
 use portable_atomic::{AtomicU32, Ordering};
 
-use crate::util::log::*;
-use crate::tasks::critical::{get_sensor_value, get_sample_count, wait_sensor_data};
+use crate::apps::demo::critical::{get_sample_count, get_sensor_value, wait_sensor_data};
 use crate::sync::primitives::CriticalSignal;
+use crate::util::log::*;
 
 pub static LED_CONTROL: CriticalSignal<bool> = CriticalSignal::new();
 
@@ -54,10 +54,7 @@ pub async fn led_blink_task(mut led: Output<'static>) {
     let blink_interval = Duration::from_millis(500);
 
     loop {
-        match select(
-            Timer::after(blink_interval),
-            LED_CONTROL.wait(),
-        ).await {
+        match select(Timer::after(blink_interval), LED_CONTROL.wait()).await {
             Either::First(_) => {
                 led_on = !led_on;
                 if led_on {

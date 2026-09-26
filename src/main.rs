@@ -1,18 +1,19 @@
 #![no_std]
 #![no_main]
-#![cfg_attr(all(feature = "defmt", feature = "dev"), feature(asm_experimental_arch))]
+#![cfg_attr(
+    all(feature = "defmt", feature = "dev"),
+    feature(asm_experimental_arch)
+)]
 
-use rustrtos::tasks;
+use rustrtos::{apps, runtime::Runtime};
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::{
     gpio::{Level, Output, OutputConfig},
-    interrupt::{software::SoftwareInterruptControl, Priority},
+    interrupt::software::SoftwareInterruptControl,
     timer::timg::TimerGroup,
 };
-use esp_rtos::embassy::InterruptExecutor;
-use static_cell::StaticCell;
 use portable_atomic::Ordering;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -34,12 +35,10 @@ fn defmt_panic() -> ! {
 #[cfg(not(feature = "dev"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop { core::hint::spin_loop(); }
+    loop {
+        core::hint::spin_loop();
+    }
 }
-
-static HIGH_PRIO_EXECUTOR: StaticCell<InterruptExecutor<3>> = StaticCell::new();
-
-static MID_PRIO_EXECUTOR: StaticCell<InterruptExecutor<2>> = StaticCell::new();
 
 #[repr(C, align(32))]
 pub struct SystemState {
@@ -67,42 +66,38 @@ static mut SYSTEM_STATE: SystemState = SystemState::new();
 async fn main(low_prio_spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    log_info!("RustRTOS v{} starting on ESP32-S3", env!("CARGO_PKG_VERSION"));
+    log_info!(
+        "RustRTOS v{} starting on ESP32-S3",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
     let sw_ints = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let runtime = Runtime::start(low_prio_spawner, timg0.timer0, sw_ints);
 
-    esp_rtos::start(timg0.timer0);
-
-    log_info!("esp-rtos scheduler initialized");
+    log_info!("RustRTOS runtime initialized");
 
     unsafe {
         SYSTEM_STATE.boot_time = Instant::now().as_micros();
     }
 
-    let high_prio_executor = InterruptExecutor::new(sw_ints.software_interrupt3);
-    let high_prio_executor = HIGH_PRIO_EXECUTOR.init(high_prio_executor);
+    runtime
+        .spawn_high(apps::demo::critical::critical_sensor_task())
+        .expect("failed to spawn high-priority task");
 
-    let high_prio_spawner = high_prio_executor.start(Priority::Priority3);
+    runtime
+        .spawn_normal(apps::demo::normal::periodic_task())
+        .expect("failed to spawn normal-priority task");
 
-    log_info!("High priority executor started (Priority3)");
-
-    high_prio_spawner.must_spawn(tasks::critical::critical_sensor_task());
-
-    let mid_prio_executor = InterruptExecutor::new(sw_ints.software_interrupt2);
-    let mid_prio_executor = MID_PRIO_EXECUTOR.init(mid_prio_executor);
-
-    let mid_prio_spawner = mid_prio_executor.start(Priority::Priority2);
-
-    log_info!("Mid priority executor started (Priority2)");
-
-    mid_prio_spawner.must_spawn(tasks::normal::periodic_task());
-
-    low_prio_spawner.must_spawn(tasks::normal::led_blink_task(led));
-    low_prio_spawner.must_spawn(tasks::normal::background_task());
+    runtime
+        .spawn_low(apps::demo::normal::led_blink_task(led))
+        .expect("failed to spawn low-priority LED task");
+    runtime
+        .spawn_low(apps::demo::normal::background_task())
+        .expect("failed to spawn low-priority background task");
 
     log_info!("All tasks spawned, entering main loop");
 
@@ -113,7 +108,8 @@ async fn main(low_prio_spawner: Spawner) {
 
         unsafe {
             SYSTEM_STATE.flags = tick_count as u32;
-            SYSTEM_STATE.sensor_cycles = tasks::critical::SENSOR_CYCLES.load(Ordering::Relaxed);
+            SYSTEM_STATE.sensor_cycles =
+                apps::demo::critical::SENSOR_CYCLES.load(Ordering::Relaxed);
         }
 
         if tick_count % 10 == 0 {

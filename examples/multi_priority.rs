@@ -7,13 +7,9 @@ use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
-use esp_hal::{
-    interrupt::{software::SoftwareInterruptControl, Priority},
-    timer::timg::TimerGroup,
-};
-use esp_rtos::embassy::InterruptExecutor;
+use esp_hal::timer::timg::TimerGroup;
 use portable_atomic::{AtomicU32, Ordering};
-use static_cell::StaticCell;
+use rustrtos::runtime::Runtime;
 
 #[cfg(feature = "dev")]
 use esp_println::println;
@@ -32,12 +28,13 @@ use esp_backtrace as _;
 #[cfg(not(feature = "dev"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop { core::hint::spin_loop(); }
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 static HIGH_PRIO_COUNT: AtomicU32 = AtomicU32::new(0);
 static DATA_SIGNAL: Signal<CriticalSectionRawMutex, u32> = Signal::new();
-static HIGH_PRIO_EXECUTOR: StaticCell<InterruptExecutor<2>> = StaticCell::new();
 
 #[embassy_executor::task]
 async fn high_priority_task() {
@@ -84,19 +81,21 @@ async fn main(spawner: Spawner) {
     println!("Multi-priority example starting");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0);
+    let sw_ints =
+        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let runtime = Runtime::start(spawner, timg0.timer0, sw_ints);
 
-    let sw_ints = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    runtime
+        .spawn_high(high_priority_task())
+        .expect("failed to spawn high-priority task");
+    runtime
+        .spawn_normal(medium_priority_task())
+        .expect("failed to spawn normal-priority task");
+    runtime
+        .spawn_low(background_task())
+        .expect("failed to spawn low-priority task");
 
-    let high_prio_executor = InterruptExecutor::new(sw_ints.software_interrupt2);
-    let high_prio_executor = HIGH_PRIO_EXECUTOR.init(high_prio_executor);
-    let high_prio_spawner = high_prio_executor.start(Priority::Priority3);
-
-    high_prio_spawner.spawn(high_priority_task()).ok();
-    spawner.spawn(medium_priority_task()).ok();
-    spawner.spawn(background_task()).ok();
-
-    println!("All tasks spawned");
+    println!("All tasks spawned through RustRTOS Runtime");
 
     loop {
         Timer::after(Duration::from_secs(60)).await;

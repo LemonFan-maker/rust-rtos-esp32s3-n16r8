@@ -2,8 +2,8 @@ use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::ram;
 use portable_atomic::{AtomicU32, AtomicU64, Ordering};
 
-use crate::util::log::*;
 use crate::sync::primitives::CriticalSignal;
+use crate::util::log::*;
 
 static SENSOR_VALUE: AtomicU32 = AtomicU32::new(0);
 
