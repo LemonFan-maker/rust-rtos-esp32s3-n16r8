@@ -1,53 +1,34 @@
 use core::cell::UnsafeCell;
-use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::mem::psram;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DmaStrategy {
-    Auto,
-    ForceDram,
-    ForcePsramBounce,
-}
-
-impl Default for DmaStrategy {
-    fn default() -> Self {
-        DmaStrategy::Auto
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DmaState {
-    Idle,
-    DmaReading,
-    DmaWriting,
-}
-
 pub const DMA_ALIGNMENT: usize = 32;
 
-pub const AUTO_PSRAM_THRESHOLD: usize = 4096;
-
+/// DMA安全缓冲区: 32字节对齐的静态存储, 配合GDMA传输使用。
+///
+/// ESP32-S3的数据缓存对CPU与GDMA不透明: GDMA直接读写物理内存, 不经过CPU数据缓存。
+/// 因此CPU写入后必须由`prepare_tx`回写缓存, GDMA写入后必须由`finish_rx`作废缓存,
+/// 否则双方可能读写到过期的缓存行。
+///
+/// 传输期间`state`标志置位, 常规访问器(`as_slice`等)会断言失败,
+/// 防止CPU与DMA同时触碰同一缓冲区。
 #[repr(C, align(32))]
 pub struct DmaBuffer<const SIZE: usize> {
     data: UnsafeCell<[u8; SIZE]>,
     state: AtomicBool,
-    strategy: DmaStrategy,
-    bounce_buffer: Option<NonNull<[u8; SIZE]>>,
 }
 
 impl<const SIZE: usize> DmaBuffer<SIZE> {
-    pub const fn new(strategy: DmaStrategy) -> Self {
+    /// 编译期约束: 缓冲区大小必须是32(缓存行)的整数倍, 否则作废/回写会波及相邻数据。
+    const SIZE_IS_CACHE_MULTIPLE: () =
+        assert!(SIZE % DMA_ALIGNMENT == 0, "DmaBuffer size must be a multiple of 32");
+
+    pub const fn new() -> Self {
         Self {
             data: UnsafeCell::new([0u8; SIZE]),
             state: AtomicBool::new(false),
-            strategy,
-            bounce_buffer: None,
         }
-    }
-
-    pub const fn new_auto() -> Self {
-        Self::new(DmaStrategy::Auto)
     }
 
     pub const fn size(&self) -> usize {
@@ -58,12 +39,43 @@ impl<const SIZE: usize> DmaBuffer<SIZE> {
         DMA_ALIGNMENT
     }
 
-    pub const fn strategy(&self) -> DmaStrategy {
-        self.strategy
-    }
-
     pub fn is_dma_active(&self) -> bool {
         self.state.load(Ordering::Acquire)
+    }
+
+    /// 准备作为DMA发送源: 回写数据缓存并标记忙, 返回只读切片。
+    /// 传输结束后调用`finish_tx`。
+    pub fn prepare_tx(&self) -> &[u8] {
+        assert!(!self.is_dma_active(), "Buffer already engaged in DMA");
+        self.state.store(true, Ordering::Release);
+        unsafe {
+            psram::cache::flush(self.data.get() as *const u8, SIZE);
+        }
+        unsafe { &*self.data.get() }
+    }
+
+    /// 结束发送: 清除忙标志。
+    pub fn finish_tx(&self) {
+        self.state.store(false, Ordering::Release);
+    }
+
+    /// 准备作为DMA接收目标: 作废数据缓存并标记忙, 返回物理内存写指针。
+    /// 传输结束后调用`finish_rx`。忙标志保证同一时刻至多一个传输/借用存在。
+    pub fn prepare_rx(&self) -> *mut u8 {
+        assert!(!self.is_dma_active(), "Buffer already engaged in DMA");
+        self.state.store(true, Ordering::Release);
+        unsafe {
+            psram::cache::invalidate(self.data.get() as *const u8, SIZE);
+        }
+        self.data.get() as *mut u8
+    }
+
+    /// 结束接收: 再次作废缓存(丢弃传输期间可能的投机预取)并清除忙标志。
+    pub fn finish_rx(&self) {
+        unsafe {
+            psram::cache::invalidate(self.data.get() as *const u8, SIZE);
+        }
+        self.state.store(false, Ordering::Release);
     }
 
     pub fn as_ptr(&self) -> *const u8 {
@@ -71,7 +83,7 @@ impl<const SIZE: usize> DmaBuffer<SIZE> {
         self.data.get() as *const u8
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut u8 {
+    pub fn as_mut_ptr(&self) -> *mut u8 {
         assert!(!self.is_dma_active(), "Cannot access buffer during DMA");
         self.data.get() as *mut u8
     }
@@ -81,50 +93,21 @@ impl<const SIZE: usize> DmaBuffer<SIZE> {
         unsafe { &*self.data.get() }
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+    /// 在独占借用下执行CPU写操作(闭包内可安全突变缓冲区)。
+    pub fn with_mut(&self, f: impl FnOnce(&mut [u8])) {
         assert!(!self.is_dma_active(), "Cannot access buffer during DMA");
-        unsafe { &mut *self.data.get() }
-    }
-
-    pub fn prepare_for_dma_read(&self) {
         self.state.store(true, Ordering::Release);
-
-        unsafe {
-            psram::cache::flush(self.data.get() as *const u8, SIZE);
-        }
-    }
-
-    pub fn complete_dma_read(&self) {
+        f(unsafe { &mut *self.data.get() });
         self.state.store(false, Ordering::Release);
     }
 
-    pub fn prepare_for_dma_write(&self) {
-        self.state.store(true, Ordering::Release);
-
-        unsafe {
-            psram::cache::invalidate(self.data.get() as *const u8, SIZE);
-        }
+    pub fn fill(&self, value: u8) {
+        self.with_mut(|s| s.fill(value));
     }
 
-    pub fn complete_dma_write(&self) {
-        unsafe {
-            psram::cache::invalidate(self.data.get() as *const u8, SIZE);
-        }
-
-        self.state.store(false, Ordering::Release);
-    }
-
-    pub fn fill(&mut self, value: u8) {
-        assert!(!self.is_dma_active(), "Cannot access buffer during DMA");
-        let slice = unsafe { &mut *self.data.get() };
-        slice.fill(value);
-    }
-
-    pub fn copy_from_slice(&mut self, src: &[u8]) {
-        assert!(!self.is_dma_active(), "Cannot access buffer during DMA");
+    pub fn copy_from_slice(&self, src: &[u8]) {
         let len = src.len().min(SIZE);
-        let slice = unsafe { &mut *self.data.get() };
-        slice[..len].copy_from_slice(&src[..len]);
+        self.with_mut(|s| s[..len].copy_from_slice(&src[..len]));
     }
 
     pub fn copy_to_slice(&self, dst: &mut [u8]) {
@@ -138,85 +121,11 @@ impl<const SIZE: usize> DmaBuffer<SIZE> {
 unsafe impl<const SIZE: usize> Send for DmaBuffer<SIZE> {}
 unsafe impl<const SIZE: usize> Sync for DmaBuffer<SIZE> {}
 
-#[repr(C, align(4))]
-pub struct DmaDescriptor {
-    pub next: u32,
-    pub buffer: u32,
-    pub size: u16,
-    pub length: u16,
-    pub flags: u32,
-}
-
-impl DmaDescriptor {
-    pub const fn new() -> Self {
-        Self {
-            next: 0,
-            buffer: 0,
-            size: 0,
-            length: 0,
-            flags: 0,
-        }
-    }
-
-    pub fn set_buffer(&mut self, ptr: *const u8, size: usize) {
-        self.buffer = ptr as u32;
-        self.size = size as u16;
-        self.length = size as u16;
-    }
-
-    pub fn link_to(&mut self, next: &DmaDescriptor) {
-        self.next = next as *const _ as u32;
-    }
-
-    pub fn set_eof(&mut self) {
-        self.flags |= 1 << 30;
-    }
-
-    pub fn set_owner_dma(&mut self) {
-        self.flags |= 1 << 31;
-    }
-
-    pub fn is_complete(&self) -> bool {
-        (self.flags & (1 << 31)) == 0
-    }
-}
-
-pub struct DmaBufferBuilder<const SIZE: usize> {
-    strategy: DmaStrategy,
-    prefill: Option<u8>,
-}
-
-impl<const SIZE: usize> DmaBufferBuilder<SIZE> {
-    pub const fn new() -> Self {
-        Self {
-            strategy: DmaStrategy::Auto,
-            prefill: None,
-        }
-    }
-
-    pub const fn with_strategy(mut self, strategy: DmaStrategy) -> Self {
-        self.strategy = strategy;
-        self
-    }
-
-    pub const fn with_prefill(mut self, value: u8) -> Self {
-        self.prefill = Some(value);
-        self
-    }
-
-    pub fn build(self) -> DmaBuffer<SIZE> {
-        let mut buf = DmaBuffer::new(self.strategy);
-        if let Some(value) = self.prefill {
-            buf.fill(value);
-        }
-        buf
-    }
-}
-
 pub const fn aligned_size(size: usize, alignment: usize) -> usize {
     (size + alignment - 1) & !(alignment - 1)
 }
 
+/// 地址是否位于ESP32-S3内部DRAM数据总线窗口(GDMA可达)。
 pub fn is_dma_capable_address(addr: usize) -> bool {
     (0x3FC8_8000..=0x3FCF_FFFF).contains(&addr)
 }
@@ -235,22 +144,13 @@ pub fn is_dma_safe<T>(ptr: *const T, size: usize) -> bool {
 macro_rules! dma_buffer {
     ($name:ident, $size:expr) => {
         static $name: $crate::mem::dma::DmaBuffer<$size> =
-            $crate::mem::dma::DmaBuffer::new_auto();
-    };
-    ($name:ident, $size:expr, $strategy:expr) => {
-        static $name: $crate::mem::dma::DmaBuffer<$size> =
-            $crate::mem::dma::DmaBuffer::new($strategy);
+            $crate::mem::dma::DmaBuffer::new();
     };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_dma_strategy_default() {
-        assert_eq!(DmaStrategy::default(), DmaStrategy::Auto);
-    }
 
     #[test]
     fn test_aligned_size() {
@@ -261,8 +161,14 @@ mod tests {
 
     #[test]
     fn test_dma_buffer_size() {
-        let buf = DmaBuffer::<1024>::new_auto();
+        let buf = DmaBuffer::<1024>::new();
         assert_eq!(buf.size(), 1024);
         assert_eq!(buf.alignment(), 32);
+    }
+
+    #[test]
+    fn test_buffer_alignment() {
+        let buf = DmaBuffer::<64>::new();
+        assert_eq!(buf.as_ptr() as usize % 32, 0);
     }
 }

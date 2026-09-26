@@ -3,10 +3,11 @@
 pub mod psram;
 pub mod pool;
 pub mod dma;
+pub mod gdma;
 
-pub use psram::{CacheMode, PsramConfig, PsramBox};
+pub use psram::{PsramConfig, PsramBox};
 pub use pool::{MemoryPool, PoolBox, Backend};
-pub use dma::{DmaBuffer, DmaStrategy};
+pub use dma::DmaBuffer;
 
 #[macro_export]
 macro_rules! dram_data {

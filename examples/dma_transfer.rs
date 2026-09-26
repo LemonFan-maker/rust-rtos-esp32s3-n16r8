@@ -6,7 +6,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
-use rustrtos::mem::dma::{DmaBuffer, DmaStrategy};
+use rustrtos::mem::dma::DmaBuffer;
 
 #[cfg(feature = "dev")]
 use esp_println::println;
@@ -28,57 +28,64 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop { core::hint::spin_loop(); }
 }
 
+fn pattern_byte(i: usize) -> u8 {
+    (i as u8).wrapping_mul(31).wrapping_add(7)
+}
+
+/// 演示DmaBuffer的缓存维护生命周期:
+/// 发送侧 fill -> prepare_tx(回写缓存) -> (外设读取物理内存) -> finish_tx;
+/// 接收侧 prepare_rx(作废缓存) -> (外设写入物理内存) -> finish_rx -> 读取。
+/// 真实GDMA搬运路径见gdma_mem2mem示例。
 #[embassy_executor::task]
 async fn dma_demo_task() {
+    static BUF: DmaBuffer<256> = DmaBuffer::new();
+
     println!("DMA Demo Task Started");
-
-    println!("DMA Buffer Allocation");
-
-    let mut buffer: DmaBuffer<256> = DmaBuffer::new(DmaStrategy::ForceDram);
-
-    println!("Buffer created:");
-    println!("Size: {} bytes", buffer.size());
-    println!("Alignment: {} bytes", buffer.alignment());
-    println!("Strategy: {:?}", buffer.strategy());
+    println!("Buffer created: size={} alignment={}", BUF.size(), BUF.alignment());
 
     println!("Write Test Data");
-    {
-        let data = buffer.as_mut_slice();
-        for i in 0..256 {
-            data[i] = i as u8;
+    BUF.with_mut(|s| {
+        for (i, b) in s.iter_mut().enumerate() {
+            *b = pattern_byte(i);
+        }
+    });
+    println!("Wrote {} bytes of test pattern", BUF.size());
+
+    println!("TX path: prepare_tx flushes dirty cache lines");
+    let tx_view = BUF.prepare_tx();
+    // 此处外设(DMA)从物理内存读取tx_view; 示例中以逐字节校验代替。
+    let mut tx_errors = 0usize;
+    for (i, b) in tx_view.iter().enumerate() {
+        if *b != pattern_byte(i) {
+            tx_errors += 1;
         }
     }
-    println!("Wrote {} bytes of test pattern", 256);
+    BUF.finish_tx();
+    println!("TX verification: {} errors found", tx_errors);
 
-    println!("Verify Data");
-    let mut errors = 0;
-    {
-        let read_data = buffer.as_slice();
-        for i in 0..256 {
-            if read_data[i] != i as u8 {
-                errors += 1;
-            }
+    println!("RX path: prepare_rx invalidates stale cache lines");
+    let rx_ptr = BUF.prepare_rx();
+    // 模拟外设把数据写入物理内存。
+    unsafe {
+        for (i, b) in core::slice::from_raw_parts_mut(rx_ptr, BUF.size())
+            .iter_mut()
+            .enumerate()
+        {
+            *b = 0xAA ^ (i as u8);
         }
     }
-    println!("Verification: {} errors found", errors);
-
-    println!("Slice Operations");
-    {
-        let read_data = buffer.as_slice();
-        let first_16 = &read_data[0..16];
-        let sum: u32 = first_16.iter().map(|&x| x as u32).sum();
-        println!("Sum of first 16 bytes: {} (expected: {})", sum, (0..16).sum::<u32>());
+    BUF.finish_rx();
+    let mut rx_errors = 0usize;
+    for (i, b) in BUF.as_slice().iter().enumerate() {
+        if *b != 0xAA ^ (i as u8) {
+            rx_errors += 1;
+        }
     }
+    println!("RX verification: {} errors found", rx_errors);
 
     println!("Fill Operation");
-    buffer.fill(0xAA);
-    println!("Filled buffer with 0xAA");
-
-    {
-        let data = buffer.as_slice();
-        let all_aa = data.iter().all(|&b| b == 0xAA);
-        println!("Fill verification: {}", if all_aa { "PASS" } else { "FAIL" });
-    }
+    BUF.fill(0x5A);
+    println!("Filled buffer with 0x5A");
 
     println!("DMA demo complete!");
 }
@@ -87,14 +94,12 @@ async fn dma_demo_task() {
 async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    println!("DMA Transfer Example");
-
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
     spawner.spawn(dma_demo_task()).ok();
 
     loop {
-        Timer::after(Duration::from_secs(60)).await;
+        Timer::after(Duration::from_secs(10)).await;
     }
 }

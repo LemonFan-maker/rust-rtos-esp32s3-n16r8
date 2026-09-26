@@ -4,63 +4,25 @@ use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheMode {
-    Auto,
-    Cached,
-    Direct,
-}
-
-impl Default for CacheMode {
-    fn default() -> Self {
-        CacheMode::Auto
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct PsramConfig {
-    pub cache_mode: CacheMode,
-    pub realtime: bool,
     pub alignment: usize,
 }
 
 impl Default for PsramConfig {
     fn default() -> Self {
-        Self {
-            cache_mode: CacheMode::Auto,
-            realtime: false,
-            alignment: 32,
-        }
+        Self { alignment: 32 }
     }
 }
 
 impl PsramConfig {
-    pub fn realtime() -> Self {
-        Self {
-            cache_mode: CacheMode::Cached,
-            realtime: true,
-            alignment: 32,
-        }
-    }
-
-    pub fn bulk_transfer() -> Self {
-        Self {
-            cache_mode: CacheMode::Direct,
-            realtime: false,
-            alignment: 32,
-        }
-    }
-
-    pub fn with_cache_mode(mut self, mode: CacheMode) -> Self {
-        self.cache_mode = mode;
-        self
-    }
-
     pub fn with_alignment(mut self, align: usize) -> Self {
         self.alignment = align;
         self
     }
 }
+
+
 
 static PSRAM_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static PSRAM_BASE: AtomicUsize = AtomicUsize::new(0);
@@ -466,48 +428,41 @@ pub struct PsramStats {
 }
 
 pub mod cache {
-    use core::arch::asm;
-
+    /// 回写指定范围的数据缓存(ROM例程, 与esp-hal内部实现相同)。
+    ///
+    /// # Safety
+    /// `addr`/`size`必须描述一段有效内存。
     #[inline]
     pub unsafe fn flush(addr: *const u8, size: usize) {
-        let mut current = addr as usize;
-        let end = current + size;
-
-        while current < end {
-            #[cfg(target_arch = "xtensa")]
-            asm!(
-                "dhwbi {0}, 0",
-                in(reg) current,
-                options(nostack, preserves_flags)
-            );
-
-            current += 32;
+        unsafe extern "C" {
+            fn rom_Cache_WriteBack_Addr(addr: u32, size: u32);
+            fn Cache_Suspend_DCache_Autoload() -> u32;
+            fn Cache_Resume_DCache_Autoload(value: u32);
         }
-
-        #[cfg(target_arch = "xtensa")]
-        asm!("memw", options(nostack, preserves_flags));
+        unsafe {
+            // 暂停自动装载, 避免未触碰的行被顺带回写(esp-hal同款处理)
+            let autoload = Cache_Suspend_DCache_Autoload();
+            rom_Cache_WriteBack_Addr(addr as u32, size as u32);
+            Cache_Resume_DCache_Autoload(autoload);
+        }
     }
 
+    /// 作废指定范围的数据缓存(ROM例程)。
+    ///
+    /// # Safety
+    /// `addr`/`size`必须描述一段有效内存。
     #[inline]
     pub unsafe fn invalidate(addr: *const u8, size: usize) {
-        let mut current = addr as usize;
-        let end = current + size;
-
-        while current < end {
-            #[cfg(target_arch = "xtensa")]
-            asm!(
-                "dhi {0}, 0",
-                in(reg) current,
-                options(nostack, preserves_flags)
-            );
-
-            current += 32;
+        unsafe extern "C" {
+            fn Cache_Invalidate_Addr(addr: u32, size: u32);
         }
-
-        #[cfg(target_arch = "xtensa")]
-        asm!("memw", options(nostack, preserves_flags));
+        unsafe { Cache_Invalidate_Addr(addr as u32, size as u32) }
     }
 
+    /// 先回写作废: 用于"CPU可能写过、随后外设要重写"的接收缓冲。
+    ///
+    /// # Safety
+    /// `addr`/`size`必须描述一段有效内存。
     #[inline]
     pub unsafe fn flush_and_invalidate(addr: *const u8, size: usize) {
         flush(addr, size);
@@ -520,15 +475,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cache_mode_default() {
-        assert_eq!(CacheMode::default(), CacheMode::Auto);
-    }
-
-    #[test]
     fn test_psram_config_default() {
         let config = PsramConfig::default();
-        assert_eq!(config.cache_mode, CacheMode::Auto);
-        assert!(!config.realtime);
         assert_eq!(config.alignment, 32);
     }
 

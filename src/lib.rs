@@ -23,9 +23,10 @@ pub use sync::primitives::{
 pub use sync::ringbuffer::RingBuffer;
 
 pub use mem::{
-    psram::{CacheMode, PsramBox, PsramConfig, PsramInfo, PsramError, PsramStats},
+    psram::{PsramBox, PsramConfig, PsramInfo, PsramError, PsramStats},
     pool::{MemoryPool, PoolBox},
-    dma::{DmaBuffer, DmaStrategy},
+    dma::DmaBuffer,
+    gdma::{copy_blocking, GdmaCopy},
 };
 
 pub use tasks::multicore::{
