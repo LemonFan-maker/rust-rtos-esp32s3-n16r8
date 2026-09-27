@@ -6,7 +6,11 @@
 )]
 
 use rustrtos::watchdog::{supervised_feed, Supervisor, Watchdog};
-use rustrtos::{apps, runtime::Runtime, system::SystemState};
+use rustrtos::{
+    apps,
+    runtime::{start_priority_executors, start_scheduler},
+    system::SystemState,
+};
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Timer};
@@ -58,7 +62,8 @@ async fn main(low_prio_spawner: Spawner) {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
     let sw_ints = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    let runtime = Runtime::start(low_prio_spawner, timg0.timer0, sw_ints);
+    start_scheduler(timg0.timer0);
+    let (high_priority_spawner, normal_priority_spawner) = start_priority_executors(sw_ints);
 
     log_info!("RustRTOS runtime initialized");
     let mut watchdog = Watchdog::enable(peripherals.LPWR, 3_000);
@@ -77,19 +82,19 @@ async fn main(low_prio_spawner: Spawner) {
 
     SYSTEM_STATE.set_boot_time(Instant::now().as_micros());
 
-    runtime
-        .spawn_high(apps::demo::critical::critical_sensor_task(sensor_heartbeat))
+    high_priority_spawner
+        .spawn(apps::demo::critical::critical_sensor_task(sensor_heartbeat))
         .expect("failed to spawn high-priority task");
 
-    runtime
-        .spawn_normal(apps::demo::normal::periodic_task(processing_heartbeat))
+    normal_priority_spawner
+        .spawn(apps::demo::normal::periodic_task(processing_heartbeat))
         .expect("failed to spawn normal-priority task");
 
-    runtime
-        .spawn_low(apps::demo::normal::led_blink_task(led, led_heartbeat))
+    low_prio_spawner
+        .spawn(apps::demo::normal::led_blink_task(led, led_heartbeat))
         .expect("failed to spawn low-priority LED task");
-    runtime
-        .spawn_low(apps::demo::normal::background_task(background_heartbeat))
+    low_prio_spawner
+        .spawn(apps::demo::normal::background_task(background_heartbeat))
         .expect("failed to spawn low-priority background task");
 
     log_info!("All tasks spawned, entering main loop");

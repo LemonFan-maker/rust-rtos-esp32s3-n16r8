@@ -56,7 +56,7 @@ pub use net::tcp::{TcpClient, TcpServer, UdpSocket, NetworkStack, NetworkError};
 
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub use net::config::NetworkConfig;
-pub use runtime::Runtime;
+pub use runtime::{start_priority_executors, start_scheduler};
 pub use system::{SystemSnapshot, SystemState};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

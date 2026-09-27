@@ -9,7 +9,7 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use portable_atomic::{AtomicU32, Ordering};
-use rustrtos::runtime::Runtime;
+use rustrtos::runtime::{start_priority_executors, start_scheduler};
 
 #[cfg(feature = "dev")]
 use esp_println::println;
@@ -83,19 +83,20 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_ints =
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    let runtime = Runtime::start(spawner, timg0.timer0, sw_ints);
+    start_scheduler(timg0.timer0);
+    let (high_priority_spawner, normal_priority_spawner) = start_priority_executors(sw_ints);
 
-    runtime
-        .spawn_high(high_priority_task())
+    high_priority_spawner
+        .spawn(high_priority_task())
         .expect("failed to spawn high-priority task");
-    runtime
-        .spawn_normal(medium_priority_task())
+    normal_priority_spawner
+        .spawn(medium_priority_task())
         .expect("failed to spawn normal-priority task");
-    runtime
-        .spawn_low(background_task())
+    spawner
+        .spawn(background_task())
         .expect("failed to spawn low-priority task");
 
-    println!("All tasks spawned through RustRTOS Runtime");
+    println!("All tasks spawned through RustRTOS priority lanes");
 
     loop {
         Timer::after(Duration::from_secs(60)).await;
