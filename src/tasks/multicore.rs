@@ -135,10 +135,17 @@ impl Core1 {
         });
     }
 
-    pub fn wait_ready() {
-        while !Self::is_ready() {
+    /// Waits for Core1 startup for at most `max_spins` polling iterations.
+    ///
+    /// Returns `false` when the startup handshake does not complete in time.
+    pub fn wait_ready_timeout(max_spins: usize) -> bool {
+        for _ in 0..max_spins {
+            if Self::is_ready() {
+                return true;
+            }
             core::hint::spin_loop();
         }
+        false
     }
 }
 
@@ -245,10 +252,15 @@ impl IpcSignal {
         self.flag.swap(false, Ordering::AcqRel)
     }
 
-    pub fn wait(&self) {
-        while !self.check_and_clear() {
+    /// Waits for a signal for at most `max_spins` polling iterations.
+    pub fn wait_timeout(&self, max_spins: usize) -> bool {
+        for _ in 0..max_spins {
+            if self.check_and_clear() {
+                return true;
+            }
             core::hint::spin_loop();
         }
+        false
     }
 
     pub fn try_wait(&self) -> bool {

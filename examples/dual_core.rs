@@ -116,7 +116,7 @@ async fn main(spawner: Spawner) {
     println!("Mode: Core1 simulated on Core0 (enable 'multicore' feature for real dual-core)");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0);
+    rustrtos::runtime::start_scheduler(timg0.timer0);
     #[cfg(feature = "multicore")]
     {
         use esp_hal::interrupt::software::SoftwareInterruptControl;
@@ -148,10 +148,12 @@ async fn main(spawner: Spawner) {
                 }
             },
         );
-        Core1::wait_ready();
-        println!("Core1 scheduler ready");
+        if rustrtos::tasks::multicore::Core1::wait_ready_timeout(1_000_000) {
+            println!("Core1 scheduler ready");
+        } else {
+            println!("Core1 scheduler startup timed out");
+        }
     }
-
     spawner.spawn(core0_task()).ok();
     spawner.spawn(monitor_task()).ok();
     spawner.spawn(ipc_receiver_task()).ok();
