@@ -6,11 +6,12 @@ use portable_atomic::{AtomicU32, Ordering};
 use crate::apps::demo::critical::{get_sample_count, get_sensor_value, wait_sensor_data};
 use crate::sync::primitives::CriticalSignal;
 use crate::util::log::*;
+use crate::watchdog::Heartbeat;
 
 pub static LED_CONTROL: CriticalSignal<bool> = CriticalSignal::new();
 
 #[embassy_executor::task]
-pub async fn periodic_task() {
+pub async fn periodic_task(heartbeat: &'static Heartbeat) {
     log_info!("Periodic task started (Priority2)");
 
     let mut ticker = Ticker::every(Duration::from_millis(10));
@@ -18,6 +19,7 @@ pub async fn periodic_task() {
 
     loop {
         ticker.next().await;
+        heartbeat.beat();
 
         let sensor_value = get_sensor_value();
 
@@ -47,7 +49,7 @@ fn process_sensor_data(value: u32) -> u32 {
 }
 
 #[embassy_executor::task]
-pub async fn led_blink_task(mut led: Output<'static>) {
+pub async fn led_blink_task(mut led: Output<'static>, heartbeat: &'static Heartbeat) {
     log_info!("LED blink task started (low priority)");
 
     let mut led_on = false;
@@ -73,11 +75,12 @@ pub async fn led_blink_task(mut led: Output<'static>) {
                 log_debug!("LED forced to {}", if led_on { "ON" } else { "OFF" });
             }
         }
+        heartbeat.beat();
     }
 }
 
 #[embassy_executor::task]
-pub async fn background_task() {
+pub async fn background_task(heartbeat: &'static Heartbeat) {
     log_info!("Background task started");
 
     let mut iteration: u64 = 0;
@@ -85,6 +88,7 @@ pub async fn background_task() {
 
     loop {
         let latest_value = wait_sensor_data().await;
+        heartbeat.beat();
 
         iteration += 1;
 

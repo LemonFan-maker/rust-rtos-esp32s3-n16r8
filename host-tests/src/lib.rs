@@ -13,5 +13,8 @@ mod ringbuffer;
 #[path = "../../src/perf.rs"]
 mod perf;
 
+#[path = "../../src/system.rs"]
+mod system;
+
 #[path = "../../src/watchdog.rs"]
 mod watchdog;

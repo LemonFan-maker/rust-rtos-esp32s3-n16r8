@@ -11,6 +11,7 @@ pub mod ota;
 pub mod perf;
 pub mod watchdog;
 pub mod runtime;
+pub mod system;
 
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub mod net;
@@ -56,6 +57,7 @@ pub use net::tcp::{TcpClient, TcpServer, UdpSocket, NetworkStack, NetworkError};
 #[cfg(any(feature = "wifi", feature = "ble", feature = "ble-esp"))]
 pub use net::config::NetworkConfig;
 pub use runtime::Runtime;
+pub use system::{SystemSnapshot, SystemState};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const NAME: &str = env!("CARGO_PKG_NAME");

@@ -4,6 +4,7 @@ use portable_atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::sync::primitives::CriticalSignal;
 use crate::util::log::*;
+use crate::watchdog::Heartbeat;
 
 static SENSOR_VALUE: AtomicU32 = AtomicU32::new(0);
 
@@ -15,7 +16,7 @@ pub static SENSOR_READY: CriticalSignal<u32> = CriticalSignal::new();
 
 #[embassy_executor::task]
 #[ram]
-pub async fn critical_sensor_task() {
+pub async fn critical_sensor_task(heartbeat: &'static Heartbeat) {
     log_info!("Critical sensor task started (Priority3, IRAM)");
 
     const TARGET_INTERVAL_US: u64 = 100;
@@ -26,6 +27,7 @@ pub async fn critical_sensor_task() {
 
     loop {
         ticker.next().await;
+        heartbeat.beat();
 
         SENSOR_CYCLES.fetch_add(1, Ordering::Relaxed);
 

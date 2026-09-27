@@ -5,7 +5,8 @@
     feature(asm_experimental_arch)
 )]
 
-use rustrtos::{apps, runtime::Runtime};
+use rustrtos::watchdog::{supervised_feed, Supervisor, Watchdog};
+use rustrtos::{apps, runtime::Runtime, system::SystemState};
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Instant, Timer};
@@ -40,27 +41,8 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     }
 }
 
-#[repr(C, align(32))]
-pub struct SystemState {
-    pub boot_time: u64,
-    pub sensor_cycles: u32,
-    pub flags: u32,
-    _pad: [u8; 16],
-}
-
-impl SystemState {
-    pub const fn new() -> Self {
-        Self {
-            boot_time: 0,
-            sensor_cycles: 0,
-            flags: 0,
-            _pad: [0; 16],
-        }
-    }
-}
-
-#[link_section = ".dram.data"]
-static mut SYSTEM_STATE: SystemState = SystemState::new();
+static SYSTEM_STATE: SystemState = SystemState::new();
+static SUPERVISOR: Supervisor<4> = Supervisor::new();
 
 #[esp_rtos::main]
 async fn main(low_prio_spawner: Spawner) {
@@ -79,24 +61,35 @@ async fn main(low_prio_spawner: Spawner) {
     let runtime = Runtime::start(low_prio_spawner, timg0.timer0, sw_ints);
 
     log_info!("RustRTOS runtime initialized");
+    let mut watchdog = Watchdog::enable(peripherals.LPWR, 3_000);
+    let sensor_heartbeat = SUPERVISOR
+        .register(1_000)
+        .expect("sensor heartbeat slot available");
+    let processing_heartbeat = SUPERVISOR
+        .register(1_000)
+        .expect("processing heartbeat slot available");
+    let led_heartbeat = SUPERVISOR
+        .register(1_500)
+        .expect("LED heartbeat slot available");
+    let background_heartbeat = SUPERVISOR
+        .register(2_500)
+        .expect("background heartbeat slot available");
 
-    unsafe {
-        SYSTEM_STATE.boot_time = Instant::now().as_micros();
-    }
+    SYSTEM_STATE.set_boot_time(Instant::now().as_micros());
 
     runtime
-        .spawn_high(apps::demo::critical::critical_sensor_task())
+        .spawn_high(apps::demo::critical::critical_sensor_task(sensor_heartbeat))
         .expect("failed to spawn high-priority task");
 
     runtime
-        .spawn_normal(apps::demo::normal::periodic_task())
+        .spawn_normal(apps::demo::normal::periodic_task(processing_heartbeat))
         .expect("failed to spawn normal-priority task");
 
     runtime
-        .spawn_low(apps::demo::normal::led_blink_task(led))
+        .spawn_low(apps::demo::normal::led_blink_task(led, led_heartbeat))
         .expect("failed to spawn low-priority LED task");
     runtime
-        .spawn_low(apps::demo::normal::background_task())
+        .spawn_low(apps::demo::normal::background_task(background_heartbeat))
         .expect("failed to spawn low-priority background task");
 
     log_info!("All tasks spawned, entering main loop");
@@ -106,16 +99,18 @@ async fn main(low_prio_spawner: Spawner) {
     loop {
         tick_count += 1;
 
-        unsafe {
-            SYSTEM_STATE.flags = tick_count as u32;
-            SYSTEM_STATE.sensor_cycles =
-                apps::demo::critical::SENSOR_CYCLES.load(Ordering::Relaxed);
-        }
+        SYSTEM_STATE.update(
+            tick_count,
+            apps::demo::critical::SENSOR_CYCLES.load(Ordering::Relaxed),
+        );
 
         if tick_count % 10 == 0 {
             log_info!("System heartbeat: {} ticks", tick_count);
         }
+        if !supervised_feed(&mut watchdog, &SUPERVISOR) {
+            log_warn!("watchdog feed withheld: supervised task heartbeat expired");
+        }
 
-        Timer::after(Duration::from_secs(1)).await;
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
